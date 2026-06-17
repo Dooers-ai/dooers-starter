@@ -35,4 +35,4 @@ Deploy recipe (AI prompt): [docs/recipes/deploy-with-dooers-push.md](docs/recipe
 
 New business domain → new file in `src/modules/agent/capabilities/` + handoff in `workflow.py`.
 
-Do not modify SDK packages or platform internals.
+Do not modify the published SDK packages. Stay within this starter and public Dooers packages.

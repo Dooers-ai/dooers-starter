@@ -16,6 +16,8 @@ Build production agents that run on **Dooers** (chat UI, Studio, WhatsApp, threa
 **Starter repo:** `https://github.com/Dooers-ai/dooers-starter`  
 **This skill:** `skills.md` in that repo (you may be reading a copy or the live file).
 
+**Public packages only:** `dooers-agents-server`, `dooers-agents-client`, `dooers-cli`, and this starter. Do not reference private Dooers repositories in docs or code.
+
 ---
 
 ## When to apply this skill
@@ -42,7 +44,7 @@ Parse: domain = Gmail + Dooers platform wiring from this skill.
 3. **Capabilities per domain** — `src/modules/agent/capabilities/<name>.py` + handoff in `workflow.py`.
 4. **SDK for persistence** — `dooers-agents-server` (`import dooers`); never roll your own thread DB.
 5. **Secrets in Studio/env** — never commit `.env`, OAuth JSON, or service account keys.
-6. **Do not copy** `dooers-service-core`, `dooers-app-web`, or internal platform code.
+6. **Use only public packages** — `dooers-agents-server`, `dooers-agents-client`, `dooers-cli`, and this starter. Do not reference or import private Dooers repositories.
 
 ---
 
@@ -215,7 +217,7 @@ When user asks for Gmail + Dooers:
 ### Scope
 
 - **In scope:** capability with Gmail tools, OAuth settings, handoff from cortex, deploy guide
-- **Out of scope:** implementing Google OAuth consent screen UI inside Dooers (document manual OAuth setup); platform internals
+- **Out of scope:** building the Dooers Studio UI or OAuth consent screens — document manual setup for the creator
 
 ### Implementation steps
 
@@ -289,14 +291,15 @@ Full guide in repo: `docs/08-deploy.md`.
 
 ---
 
-## Security boundaries (never expose in agent repos)
+## Security boundaries
 
-- `dooers-service-core` hire/seed/billing
-- Runtime API key encryption internals
-- WhatsApp HMAC secret provisioning
-- Marketplace admin APIs
+Stay within the **public SDK contract**. Do not implement or document:
 
-The agent only exposes: **WebSocket + HTTP routes + SDK handler**.
+- Platform admin or marketplace APIs not covered in this skill
+- Credential provisioning beyond env vars / Studio settings fields
+- Reverse-engineering Dooers platform services
+
+The agent repo only exposes: **WebSocket + HTTP routes + SDK handler**.
 
 ---
 
@@ -346,5 +349,5 @@ SDK reference: https://github.com/Dooers-ai/dooers-agents-server/blob/main/docs/
 - Monolithic handler with all business logic (use capabilities)
 - Storing messages in custom tables
 - Committing `gcp-service-account.json` or `.env`
-- Calling Dooers internal APIs not documented in this skill
+- Calling undocumented Dooers APIs
 - Skipping `run_start` / `run_end`

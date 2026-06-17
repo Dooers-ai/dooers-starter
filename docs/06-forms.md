@@ -55,7 +55,7 @@ const { submit, cancel } = useForm(eventId, formData, threadId);
 await submit({ rating: "5", comment: "Ótimo!" });
 ```
 
-A UI da plataforma renderiza automaticamente via `chat-form-event.tsx`.
+O chat na **UI Dooers** (dashboard e public chat) renderiza formulários automaticamente via `dooers-agents-client`.
 
 ## Boas práticas
 

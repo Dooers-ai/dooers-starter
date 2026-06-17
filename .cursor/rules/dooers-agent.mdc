@@ -25,10 +25,9 @@ alwaysApply: true
 
 ## Do NOT
 
-- Import or copy code from `dooers-service-core`, `dooers-app-web`, or customer agents (`dufrio-agente-rh` ERP tools)
 - Commit secrets (`.env`, API keys, service account JSON)
 - Reimplement WebSocket protocol or WhatsApp HMAC — use SDK helpers
-- Add deploy/platform internals to this repo
+- Reference or import private Dooers codebases — use only this starter and public packages (`dooers-agents-server`, `dooers-agents-client`, `dooers-cli`)
 
 ## When adding features
 

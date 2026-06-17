@@ -1,4 +1,4 @@
-"""Dispatch for inbound Dooers tools-whatsapp (outbound and HMAC live in the ``dooers`` SDK)."""
+"""Dispatch for inbound Dooers WhatsApp (outbound and HMAC live in the ``dooers`` SDK)."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ async def dispatch_tools_whatsapp_inbound(
     agent_handler: Any,
     body_json: dict[str, Any],
 ) -> str:
-    """Run handler for an inbound message from dooers-tools-whatsapp. Returns thread_id."""
+    """Run handler for an inbound message from the Dooers WhatsApp service. Returns thread_id."""
     user_raw = (body_json.get("user_id") or "").strip()
     e164 = normalize_e164(user_raw)
     to_e164_raw = (body_json.get("to_e164") or "").strip()
@@ -24,7 +24,7 @@ async def dispatch_tools_whatsapp_inbound(
     if not instance_id:
         raise HTTPException(
             status_code=400,
-            detail="instance_id is required (tools-whatsapp must send instance id for thread routing)",
+            detail="instance_id is required (Dooers WhatsApp service must send instance id for thread routing)",
         )
     thread_id = whatsapp_thread_id(e164, instance_id=instance_id)
     user = User(

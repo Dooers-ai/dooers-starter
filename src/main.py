@@ -123,7 +123,7 @@ async def uploads(
     run_id: str = Form(""),
     source: str = Form("chat"),
 ):
-    """Chat/form attachments (same role as dooers-service-agent POST /uploads)."""
+    """Chat/form attachments — returns ref_id for the WebSocket message flow."""
     data = await file.read(MAX_UPLOAD_BYTES + 1)
     if len(data) > MAX_UPLOAD_BYTES:
         raise HTTPException(status_code=413, detail=f"File exceeds {MAX_UPLOAD_BYTES} bytes")

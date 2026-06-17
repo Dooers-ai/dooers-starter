@@ -78,7 +78,7 @@ Cada evento do handler é **persistido na thread** (como no WebSocket). A UI Doo
 Já incluído no starter:
 
 ```
-WhatsApp → Dooers Tools Service → POST …/whatsapp/inbound
+WhatsApp → serviço WhatsApp da Dooers → POST …/whatsapp/inbound
          → dispatch(channel="whatsapp", channel_meta={whatsapp: {...}})
          → handler → send.text() → outbound → WhatsApp
 ```
@@ -164,11 +164,11 @@ Para WhatsApp, use `send.text()` — o SDK roteia para o telefone quando `channe
 
 ---
 
-## O que fica na plataforma (não no repo do agente)
+## O que configura na plataforma Dooers (fora deste repo)
 
-- Publicação de links de public chat
-- Provisionamento WhatsApp (instância, QR, Meta/Evolution)
-- Hire de blueprint em team/workspace
-- Marketplace / billing
+- Links de public chat (workspace)
+- Conexão WhatsApp (instância, QR)
+- Contratar blueprint num time
+- Marketplace e billing (se aplicável)
 
-O criador expõe **runtime do agente** (WebSocket + rotas de canal que escolher) e regista no Studio.
+O criador expõe o **runtime do agente** (WebSocket + rotas de canal) e regista no Studio.

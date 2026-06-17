@@ -98,4 +98,4 @@ import { AgentProvider, useMessage } from "dooers-agents-client";
 
 Hooks principais: `useConnection`, `useMessage`, `useForm`, `useUpload`, `useSettings`.
 
-A UI oficial da plataforma (`dooers-app-web`) já usa estes hooks — na maioria dos casos você só precisa do server SDK.
+Para apps customizadas use `dooers-agents-client`. Para chat na plataforma Dooers, basta o server SDK neste starter.

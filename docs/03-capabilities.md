@@ -49,16 +49,16 @@ O loop existente já faz `cortex.handoffs.append(agent)`.
 
 ## Handoffs encadeados
 
-Para grafos maiores (ex.: RH com benefícios → planos → vales):
+Para grafos com vários níveis de especialista:
 
 ```python
-beneficios = await create_beneficios(...)
-planos = await create_planos(...)
-cortex.handoffs.append(beneficios)
-beneficios.handoffs.append(planos)
+suporte = await create_suporte(...)
+escalacao = await create_escalacao(...)
+cortex.handoffs.append(suporte)
+suporte.handoffs.append(escalacao)
 ```
 
-Ver referência interna: `dufrio-agente-rh/src/modules/agent/workflow.py`.
+Ver `workflow.py` e `capabilities/feedback.py` neste repositório.
 
 ## RAG por capability
 

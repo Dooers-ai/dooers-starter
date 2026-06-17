@@ -164,7 +164,7 @@ O `dooers push` sobe o runtime; você ainda precisa ligar o blueprint à platafo
 1. **Studio** → abra o blueprint criado/atualizado pelo push
 2. **Messages URL** = `wss://{host}{api_prefix}/ws`  
    Ex.: `wss://meu-agente.run.dooers.ai/api/prod/meu-agente/ws`
-3. **Runtime API key** — gere e guarde (usada no hire/seed)
+3. **Runtime API key** — gere e guarde no blueprint
 4. **Settings** — configure modelo LLM e `provider_api_key` na UI
 5. **Ativar** o blueprint → **Publicar** (se marketplace) → **Contratar** num time
 6. **WhatsApp** (opcional) — conectar instância no painel de canais; inbound aponta para `{SERVICE_URL}{api_prefix}/whatsapp/inbound`
@@ -237,7 +237,7 @@ Gere `DOOERS_API_TOKEN` no painel da organização (Settings → API / CLI token
 - Commitar `.env`, service account JSON ou API keys
 - Inventar flags do CLI — usar `dooers push --help`
 - Executar `dooers login` ou `dooers push` sem o criador autenticado (requer conta e token)
-- Expor internals da plataforma Dooers (core, seed, billing)
+- Documentar APIs ou serviços Dooers fora dos pacotes públicos
 
 ### Prompt copiável para o criador
 

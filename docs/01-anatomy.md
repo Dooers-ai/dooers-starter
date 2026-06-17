@@ -80,13 +80,16 @@ Guardrails opcionais em `capabilities/guard.py`.
 - `feedback.py` — exemplo: formulário de feedback
 - `guard.py` — validação entrada/saída
 
-Padrão de handoff (ver `dufrio-agente-rh` para grafos maiores):
+Padrão de handoff encadeado (vários especialistas):
 
 ```python
-cortex = await create_cortex(...)
-feedback = await create_feedback_capability(...)
-cortex.handoffs.append(feedback)
+suporte = await create_suporte(...)
+escalacao = await create_escalacao(...)
+cortex.handoffs.append(suporte)
+suporte.handoffs.append(escalacao)
 ```
+
+Ver `src/modules/agent/workflow.py` e o exemplo `capabilities/feedback.py` neste starter.
 
 ### `src/modules/agent/schemas.py`
 

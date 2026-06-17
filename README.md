@@ -4,6 +4,18 @@ Starter kit oficial para criar agentes de IA na plataforma [Dooers](https://dooe
 
 Destinado a criadores que usam ferramentas como Cursor ou Claude Code — use **[skills.md](skills.md)** como skill principal (URL compartilhável para prompts).
 
+## Pacotes públicos Dooers
+
+Este starter usa apenas artefactos publicados:
+
+| Pacote | Uso |
+|--------|-----|
+| [`dooers-agents-server`](https://github.com/Dooers-ai/dooers-agents-server) | SDK Python — handler, threads, dispatch, WhatsApp, RAG |
+| [`dooers-agents-client`](https://github.com/Dooers-ai/dooers-agents-client) | SDK React (opcional — UI customizada) |
+| `dooers-cli` | Deploy — `dooers push` |
+
+Toda a documentação baseia-se neste repositório e nesses pacotes.
+
 ## Skill para IAs
 
 Cole no prompt:
@@ -15,7 +27,7 @@ https://github.com/Dooers-ai/dooers-starter/blob/main/skills.md
 
 Ou, com o repo aberto: `@skills.md` / skill `dooers-agent` em `.cursor/skills/`.
 
-A documentação em `docs/` cobre **contratos públicos**, não a implementação interna da plataforma.
+A documentação em `docs/` descreve apenas este starter e os pacotes públicos acima.
 
 ## O que vem pronto
 
@@ -23,7 +35,7 @@ A documentação em `docs/` cobre **contratos públicos**, não a implementaçã
 - Grafo **cortex → capabilities** (exemplo: `feedback` com formulário)
 - RAG via OpenAI Vector Store (`/settings-upload`)
 - Uploads de chat (`/uploads`) com persistência opcional
-- WhatsApp inbound (`/whatsapp/inbound`) via serviço Dooers Tools
+- WhatsApp inbound (`/whatsapp/inbound`) via serviço WhatsApp da Dooers
 - Settings schema para o Studio (`schemas.py`)
 - `dooers.yaml` — metadados do blueprint
 - `Dockerfile` — imagem para deploy
