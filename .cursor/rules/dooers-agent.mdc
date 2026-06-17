@@ -1,0 +1,61 @@
+---
+description: Conventions for building Dooers AI agents with this starter kit
+globs:
+  - "src/**/*.py"
+  - "docs/**/*.md"
+alwaysApply: true
+---
+
+# Dooers Agent Starter — rules for AI assistants
+
+## Architecture (mandatory)
+
+- **Handler** lives in `src/modules/agent/agent.py` — async generator with `yield send.*`
+- **Workflow** in `workflow.py` — OpenAI Agents SDK `Runner.run`, not raw LLM calls
+- **Capabilities** in `src/modules/agent/capabilities/` — one domain per file, register handoffs in `workflow.py`
+- **Settings UI** in `schemas.py` — use `SettingsField`, `SettingsFieldVisibility.CREATOR`
+- **HTTP routes** only in `main.py` — do not add business logic there
+
+## SDK contract
+
+- Package: `dooers-agents-server` (`import dooers`)
+- Every turn: `yield send.run_start()` … `yield send.run_end()`
+- Persist threads via SDK — never write SQL for messages/events
+- Read `docs/02-sdk-contract.md` before changing handler signatures
+
+## Do NOT
+
+- Import or copy code from `dooers-service-core`, `dooers-app-web`, or customer agents (`dufrio-agente-rh` ERP tools)
+- Commit secrets (`.env`, API keys, service account JSON)
+- Reimplement WebSocket protocol or WhatsApp HMAC — use SDK helpers
+- Add deploy/platform internals to this repo
+
+## When adding features
+
+| Feature | Files to touch |
+|---------|----------------|
+| New domain | `capabilities/<name>.py`, `workflow.py` |
+| Studio field | `schemas.py` |
+| RAG field | `schemas.py`, optional allowlist in capability |
+| Form | tool in capability + form builders in `agent.py` |
+| External channel | `dispatch()` or `channels/` |
+
+## Code style
+
+- Python 3.11+, ruff line-length 120
+- Match existing naming: `create_<capability>`, `dooers_agent_handler`
+- Run `uv run poe check` after edits
+
+## Deploy
+
+Read `docs/08-deploy.md` before suggesting deploy. The creator runs `dooers login` and `dooers push` — do not commit secrets or run push without their credentials.
+
+Recipe: `docs/recipes/deploy-with-dooers-push.md`
+
+## Reference docs (read first)
+
+0. `skills.md` — full agent creation workflow (integrations, deploy)
+1. `docs/01-anatomy.md`
+2. `docs/03-capabilities.md`
+3. `docs/02-sdk-contract.md`
+4. `docs/08-deploy.md` — when deploy is requested

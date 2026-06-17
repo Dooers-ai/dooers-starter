@@ -1,0 +1,24 @@
+protocol_version: "2"
+name: My Dooers Agent
+description: Starter agent built with dooers-starter.
+message_path: /
+message_scheme: wss
+whatsapp:
+  enabled: true
+  path: /whatsapp/inbound
+profile:
+  summary: Assistente com RAG, formulários e WhatsApp via Dooers.
+  capabilities:
+    - chat multimodal
+    - base de conhecimento
+    - formulários na UI
+    - WhatsApp
+  tools:
+    - pesquisa documental
+    - coleta de feedback
+ui:
+  suggested_prompts:
+    - title: O que você sabe?
+      prompt: O que você sabe sobre a empresa?
+    - title: Deixar feedback
+      prompt: Quero deixar um feedback sobre o atendimento

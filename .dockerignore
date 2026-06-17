@@ -1,0 +1,12 @@
+.venv
+.git
+**/__pycache__
+**/*.pyc
+**/.pytest_cache
+.ruff_cache
+.env
+gcp-service-account.json
+*-service-account*.json
+**/credentials*.json
+.pytest_cache
+.cursor
