@@ -42,7 +42,7 @@ Parse: domain = Gmail + Dooers platform wiring from this skill.
 1. **Start from the starter** — clone `dooers-starter` or match its layout exactly.
 2. **One handler** — `dooers_agent_handler` in `agent.py`; async generator with `yield send.*`.
 3. **Capabilities per domain** — `src/modules/agent/capabilities/<name>.py` + handoff in `workflow.py`.
-4. **SDK for persistence** — `dooers-agents-server` (`import dooers`); never roll your own thread DB.
+4. **SDK for persistence** — `dooers-agents-server` (`from dooers.agents.server import ...`); never roll your own thread DB.
 5. **Secrets in Studio/env** — never commit `.env`, OAuth JSON, or service account keys.
 6. **Use only public packages** — `dooers-agents-server`, `dooers-agents-client`, `dooers-cli`, and this starter. Do not reference or import private Dooers repositories.
 
@@ -200,13 +200,13 @@ Use these platform features — do not reimplement:
 | Custom external channel | Your HTTP route → `dispatch(channel="...", channel_meta={...})` |
 | Proactive / webhooks | `agent_server.dispatch(handler, agent_id, message=..., channel="api")` |
 | Deploy | `dooers push` (reads `dooers.yaml` + `Dockerfile`) |
-| Multimodal input | `dooers.format_user_input(incoming, api_provider)` in workflow |
+| Multimodal input | `format_user_input(incoming, api_provider)` from `dooers.agents.server` in workflow |
 
-**Packages (PyPI):**
+**Packages (PyPI/npm):**
 
-- Server: `dooers-agents-server`
+- Server: `dooers-agents-server` — `from dooers.agents.server import AgentServer, AgentConfig`
 - Client UI (optional custom app): `dooers-agents-client`
-- CLI: `dooers-cli`
+- CLI: `dooers-cli` — `pip install dooers-cli` → command `dooers`
 
 ---
 

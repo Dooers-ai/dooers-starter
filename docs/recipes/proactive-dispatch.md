@@ -3,7 +3,7 @@
 ## Código
 
 ```python
-from dooers import User
+from dooers.agents.server import User
 
 async def notify_user(agent_server, agent_id: str, user_id: str, message: str):
     stream = await agent_server.dispatch(

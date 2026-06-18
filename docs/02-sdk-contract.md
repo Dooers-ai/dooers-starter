@@ -1,6 +1,10 @@
 # SDK contract
 
-O agente usa o pacote Python **`dooers-agents-server`** (`import dooers`).
+O agente usa o pacote Python **`dooers-agents-server`**.
+
+```python
+from dooers.agents.server import AgentConfig, AgentServer
+```
 
 Documentação completa do handler: [dooers-agents-server SDK reference](https://github.com/Dooers-ai/dooers-agents-server/blob/main/docs/sdk-handler-reference.md).
 

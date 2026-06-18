@@ -18,7 +18,7 @@ alwaysApply: true
 
 ## SDK contract
 
-- Package: `dooers-agents-server` (`import dooers`)
+- Package: `dooers-agents-server` (`from dooers.agents.server import ...`)
 - Every turn: `yield send.run_start()` … `yield send.run_end()`
 - Persist threads via SDK — never write SQL for messages/events
 - Read `docs/02-sdk-contract.md` before changing handler signatures

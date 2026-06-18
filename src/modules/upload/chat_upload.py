@@ -1,6 +1,6 @@
 """Shared logic for POST /uploads (chat/form attachments).
 
-Staging and durable chat blobs are handled by :meth:`dooers.server.AgentServer.chat_upload`.
+Staging and durable chat blobs are handled by :meth:`dooers.agents.server.server.AgentServer.chat_upload`.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from src.modules.agent.agent import agent_server
 
-# Match :class:`~dooers.config.AgentConfig` / :attr:`dooers.server.AgentServer.upload_max_size_bytes`.
+# Match :class:`~dooers.agents.server.config.AgentConfig` / :attr:`dooers.agents.server.server.AgentServer.upload_max_size_bytes`.
 MAX_UPLOAD_BYTES = agent_server.upload_max_size_bytes
 
 

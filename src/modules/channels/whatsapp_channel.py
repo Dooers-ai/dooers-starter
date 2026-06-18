@@ -1,4 +1,4 @@
-"""Dispatch for inbound Dooers WhatsApp (outbound and HMAC live in the ``dooers`` SDK)."""
+"""Dispatch for inbound Dooers WhatsApp (outbound and HMAC live in the ``dooers-agents-server`` SDK)."""
 
 from __future__ import annotations
 
