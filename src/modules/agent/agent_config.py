@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dooers.config import AgentConfig
+from dooers.agents.server import AgentConfig
 
 from src.config import settings
 from src.modules.agent.schemas import settings_schema

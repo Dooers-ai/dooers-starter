@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from dooers import User, normalize_e164, whatsapp_thread_id
+from dooers.agents.server import User, normalize_e164, whatsapp_thread_id
 from fastapi import HTTPException
 
 

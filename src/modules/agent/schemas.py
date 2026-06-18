@@ -1,4 +1,4 @@
-from dooers import (
+from dooers.agents.server import (
     SettingsField,
     SettingsFieldGroup,
     SettingsFieldType,

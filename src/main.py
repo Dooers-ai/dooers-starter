@@ -3,7 +3,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Literal
 
-from dooers import verify_dooers_whatsapp_tool_inbound_with_persistence
+from dooers.agents.server import verify_dooers_whatsapp_tool_inbound_with_persistence
 from fastapi import APIRouter, FastAPI, Form, HTTPException, Request, UploadFile, WebSocket
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response

@@ -5,7 +5,7 @@ from typing import Any
 
 from agents import Agent, Runner, trace
 
-from dooers import AgentIncoming, AgentMemory, AgentSend, format_user_input
+from dooers.agents.server import AgentIncoming, AgentMemory, AgentSend, format_user_input
 
 from src.config import settings as app_settings
 from src.modules.agent.capabilities.cortex import CORTEX_MAX_TURNS, create_cortex

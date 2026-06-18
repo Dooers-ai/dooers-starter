@@ -12,7 +12,7 @@ import os
 from collections.abc import Iterable
 from typing import Any
 
-from dooers import AgentSend, AgentServer, ImagePart
+from dooers.agents.server import AgentSend, AgentServer, ImagePart
 from openai import AsyncOpenAI
 
 from src.config import settings as app_settings
