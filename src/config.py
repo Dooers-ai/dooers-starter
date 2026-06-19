@@ -22,7 +22,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("USE_API_PREFIX"),
     )
     api_environment: str = "dev"
-    api_agent_name: str = "dooers-starter"
+    api_agent_name: str = "whatsapp-franquia"
     #: Root log level for the process (DEBUG, INFO, WARNING, …). Azure SDK / httpx stay at WARNING — see ``src.main.configure_logging``.
     logging_level: str = Field(default="INFO", validation_alias=AliasChoices("LOGGING_LEVEL"))
 
@@ -117,7 +117,24 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("AGENT_ALLOWED_CONTENT_TYPES", "ALLOWED_CONTENT_TYPES"),
     )
 
-    assistant_name: str = Field(default="Assistant", validation_alias=AliasChoices("ASSISTANT_NAME"))
+    assistant_name: str = Field(default="Assistente", validation_alias=AliasChoices("ASSISTANT_NAME"))
+
+    # ==========================================================================
+    # Supabase — business data (trainings, units, candidates)
+    # ==========================================================================
+    supabase_url: str = Field(default="", validation_alias=AliasChoices("SUPABASE_URL"))
+    supabase_key: str = Field(default="", validation_alias=AliasChoices("SUPABASE_KEY"))
+
+    # ==========================================================================
+    # Agent domain config
+    # ==========================================================================
+    gestor_phone: str = Field(default="", validation_alias=AliasChoices("GESTOR_PHONE"))
+
+    # ==========================================================================
+    # Tally Webhooks
+    # ==========================================================================
+    #: HMAC signing secret for Tally webhook verification. Leave empty to accept all requests (dev mode).
+    tally_signing_secret: str = Field(default="", validation_alias=AliasChoices("TALLY_SIGNING_SECRET"))
 
     @property
     def api_prefix(self) -> str:
@@ -137,8 +154,7 @@ def _validate(s: Settings) -> None:
     rag = (s.rag_pipeline or "").strip().lower()
     if rag not in {"openai", "azure_ai_search"}:
         errors.append("RAG_PIPELINE must be one of: openai, azure_ai_search")
-    if rag == "openai" and not s.openai_api_key:
-        errors.append("OPENAI_API_KEY is required when RAG_PIPELINE=openai")
+    # OPENAI_API_KEY is a creator-visible agent setting (schemas.py) — not required as env var at startup.
     # azure_ai_search: credentials may live in agent settings (Documentos RAG); env vars are optional fallback.
     archive = (s.rag_storage_service or "none").strip().lower()
     if archive not in {"none", "gcp", "azure"}:

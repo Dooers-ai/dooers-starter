@@ -8,26 +8,19 @@ from agents import Agent, Runner, trace
 from dooers.agents.server import AgentIncoming, AgentMemory, AgentSend, format_user_input
 
 from src.config import settings as app_settings
+from src.modules.agent.agent_context import AgentRunContext
 from src.modules.agent.capabilities.cortex import CORTEX_MAX_TURNS, create_cortex
-from src.modules.agent.capabilities.feedback import create_feedback_capability
 from src.modules.agent.capabilities.guard import run_guard_check
-from src.modules.rag.service import rag_service
+from src.modules.agent.capabilities.treinamentos import create_treinamentos_capability
+from src.modules.agent.capabilities.recrutamento import create_recrutamento_capability
 from src.modules.helpers.llm_provider import (
     build_agents_run_config,
     litellm_api_key_env,
     resolve_agents_run_model_name,
 )
+from src.modules.services.supabase_client import get_supabase_client_for_settings
 
 logger = logging.getLogger(__name__)
-
-
-async def _create_additional_capabilities(agent_id: str, agent_settings: dict[str, Any]) -> list[Agent[Any]]:
-    feedback = await create_feedback_capability(
-        agent_id,
-        agent_settings,
-        rag_service=rag_service,
-    )
-    return [feedback]
 
 
 def _serialize_runner_new_items(result: Any) -> list[dict[str, Any]]:
@@ -79,9 +72,10 @@ async def run_workflow(
                 "guard_out_ok": False,
                 "guard_out_reason": "",
                 "new_runner_items": [],
+                "pending_whatsapp_sends": [],
             }
 
-        reply_text, new_runner_items = await _execute_agent_workflow(
+        reply_text, new_runner_items, pending_whatsapp_sends = await _execute_agent_workflow(
             incoming=incoming,
             memory=memory,
             agent_settings=agent_settings,
@@ -102,6 +96,7 @@ async def run_workflow(
         if not guard_out_ok:
             logger.info("Guard-out blocked: %s", (guard_out_reason or "")[:200])
             reply_text = guard_out_reason or "A resposta não pôde ser enviada."
+            pending_whatsapp_sends = []  # do not dispatch outbound if guard blocked
 
         return {
             "guard_in_ok": True,
@@ -110,7 +105,44 @@ async def run_workflow(
             "guard_out_ok": guard_out_ok,
             "guard_out_reason": guard_out_reason if not guard_out_ok else "",
             "new_runner_items": new_runner_items,
+            "pending_whatsapp_sends": pending_whatsapp_sends,
         }
+
+
+async def _build_run_context(
+    incoming: AgentIncoming,
+    agent_settings: dict[str, Any],
+) -> AgentRunContext:
+    """Build AgentRunContext from incoming and agent_settings."""
+    supabase = await get_supabase_client_for_settings(agent_settings)
+    agent_id = incoming.context.agent_id or ""
+    # channel_meta is set by whatsapp_channel.py → dispatch(..., channel_meta={...})
+    channel_meta = getattr(incoming.context, "channel_meta", None) or {}
+    whatsapp_meta = channel_meta.get("whatsapp", {}) if isinstance(channel_meta, dict) else {}
+    whatsapp_instance_id = str(whatsapp_meta.get("instance_id") or "").strip()
+    agent_phone_e164 = str(whatsapp_meta.get("agent_phone_e164") or "").strip()
+
+    gestor_phone = (
+        agent_settings.get("gestor_phone")
+        or app_settings.gestor_phone
+        or ""
+    ).strip()
+
+    link_avaliacao = (agent_settings.get("link_avaliacao_comportamental") or "").strip()
+    nome_agente = (agent_settings.get("agent_name") or app_settings.assistant_name or "Assistente").strip()
+    openai_api_key = (agent_settings.get("openai_api_key") or "").strip()
+
+    return AgentRunContext(
+        supabase=supabase,
+        openai_api_key=openai_api_key,
+        agent_id=agent_id,
+        whatsapp_instance_id=whatsapp_instance_id,
+        agent_phone_e164=agent_phone_e164,
+        gestor_phone=gestor_phone,
+        link_avaliacao_comportamental=link_avaliacao,
+        nome_agente=nome_agente,
+        agent_settings=agent_settings,
+    )
 
 
 async def _execute_agent_workflow(
@@ -120,20 +152,22 @@ async def _execute_agent_workflow(
     agent_settings: dict[str, Any],
     user_message_item: dict[str, Any],
     trace_group_id: str,
-) -> tuple[str, list[dict[str, Any]]]:
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     agent_id = incoming.context.agent_id or ""
-    capability_agents = await _create_additional_capabilities(agent_id, agent_settings)
+
+    run_context = await _build_run_context(incoming, agent_settings)
+
+    treinamentos = create_treinamentos_capability(agent_id, agent_settings)
+    recrutamento = create_recrutamento_capability(agent_id, agent_settings)
 
     cortex = await create_cortex(
         agent_id=agent_id,
         agent_settings=agent_settings,
-        attach_knowledge_tools=True,
+        attach_knowledge_tools=False,
         knowledge_field_allowlist=None,
         extra_tools=None,
-        handoffs=None,
+        handoffs=[treinamentos, recrutamento],
     )
-    for agent in capability_agents:
-        cortex.handoffs.append(agent)
 
     starting_capability: Agent[Any] = cortex
 
@@ -153,14 +187,15 @@ async def _execute_agent_workflow(
                 input_items,
                 run_config=run_config,
                 max_turns=CORTEX_MAX_TURNS,
-                context=None,
+                context=run_context,
             )
     except Exception:
         logger.exception("workflow _execute_agent_workflow: Runner.run failed")
         raise
 
     new_runner_items = _serialize_runner_new_items(result)
+    pending_sends = list(run_context.pending_whatsapp_sends)
 
     out = result.final_output
     text = out if isinstance(out, str) else str(out) if out is not None else ""
-    return text.strip(), new_runner_items
+    return text.strip(), new_runner_items, pending_sends

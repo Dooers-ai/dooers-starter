@@ -9,15 +9,6 @@ from dooers.agents.server import (
 
 from src.config import settings
 
-# SDK: flat fields per group only (no nested groups, no show-if).
-# Endpoint + API version apply only to Azure OpenAI; still listed for all (labels clarify).
-
-# Curated multimodal chat models (`provider:model_id`). Sourced from provider docs (vision/image input).
-# OpenAI: frontier GPT-5.4 family + GPT-4o + GPT-4 Turbo (platform.openai.com/docs/models).
-# Azure: same model id as deployment name suggestion — must match the deployment in Azure.
-# Gemini: 3.x preview + 2.5 stable + 1.5 (ai.google.dev/gemini-api/docs/models).
-# Claude: 4.x + 3.x snapshots (docs.anthropic.com — vision on all current models).
-
 _OPENAI_MULTIMODAL: list[tuple[str, str]] = [
     ("gpt-5.4", "GPT-5.4"),
     ("gpt-5.4-mini", "GPT-5.4 mini"),
@@ -56,123 +47,36 @@ _CLAUDE_MULTIMODAL: list[tuple[str, str]] = [
 def _llm_model_select_options() -> list[SettingsSelectOption]:
     out: list[SettingsSelectOption] = []
     for model_id, short in _OPENAI_MULTIMODAL:
-        out.append(
-            SettingsSelectOption(value=f"openai:{model_id}", label=f"OpenAI — {short} (multimodal)"),
-        )
+        out.append(SettingsSelectOption(value=f"openai:{model_id}", label=f"OpenAI — {short}"))
     for model_id, short in _OPENAI_MULTIMODAL:
         out.append(
             SettingsSelectOption(
                 value=f"azure_openai:{model_id}",
-                label=f"Azure OpenAI — deployment «{model_id}» (ajuste ao seu recurso)",
-            ),
+                label=f"Azure OpenAI — deployment «{model_id}»",
+            )
         )
     for model_id, short in _GEMINI_MULTIMODAL:
-        out.append(
-            SettingsSelectOption(value=f"gemini:{model_id}", label=f"Google — {short}"),
-        )
+        out.append(SettingsSelectOption(value=f"gemini:{model_id}", label=f"Google — {short}"))
     for model_id, short in _CLAUDE_MULTIMODAL:
-        out.append(
-            SettingsSelectOption(value=f"claude:{model_id}", label=f"Anthropic — {short}"),
-        )
+        out.append(SettingsSelectOption(value=f"claude:{model_id}", label=f"Anthropic — {short}"))
     return out
 
 
 def build_settings_schema() -> SettingsSchema:
-    base = settings.public_base_url
     return SettingsSchema(
         fields=[
+            # ── 1. Identidade do agente ───────────────────────────────────────
             SettingsFieldGroup(
-                id="llm",
-                label="LLM",
+                id="identidade",
+                label="Identidade do agente",
                 collapsible="closed",
                 fields=[
                     SettingsField(
-                        id="llm_model",
-                        type=SettingsFieldType.SELECT,
-                        label="Modelo LLM — chat (multimodal)",
-                        value="openai:gpt-4o-mini",
-                        options=_llm_model_select_options(),
-                        visibility=SettingsFieldVisibility.CREATOR,
-
-                    ),
-                    SettingsField(
-                        id="provider_azure_openai_endpoint",
+                        id="agent_name",
                         type=SettingsFieldType.TEXT,
-                        label="Endpoint (apenas se utilizando Azure)",
-                        placeholder="https://RESOURCE.openai.azure.com/",
-                        visibility=SettingsFieldVisibility.CREATOR,
-
-                    ),
-                    SettingsField(
-                        id="provider_azure_openai_api_version",
-                        type=SettingsFieldType.TEXT,
-                        label="API version (apenas se utilizando Azure OpenAI)",
-                        placeholder="2024-08-01-preview",
-                        visibility=SettingsFieldVisibility.CREATOR,
-
-                    ),
-                    SettingsField(
-                        id="provider_api_key",
-                        type=SettingsFieldType.PASSWORD,
-                        label="Chave API — chat (fornecedor LLM)",
-                        placeholder="Chave do fornecedor escolhido (OpenAI, Gemini, Claude, Azure, …)",
-                        visibility=SettingsFieldVisibility.CREATOR,
-
-                    ),
-                    SettingsField(
-                        id="openai_api_key",
-                        type=SettingsFieldType.PASSWORD,
-                        label="Chave API OpenAI — STT e TTS",
-                        required=True,
-                        placeholder="Obrigatória: STT e TTS usam sempre a API OpenAI (independente do chat)",
-                        visibility=SettingsFieldVisibility.CREATOR,
-
-                    ),
-                    SettingsField(
-                        id="stt_model",
-                        type=SettingsFieldType.TEXT,
-                        label="Modelo STT (áudio → texto)",
-                        value="gpt-4o-transcribe",
-                        placeholder="OpenAI: ex. gpt-4o-transcribe, whisper-1",
-                        visibility=SettingsFieldVisibility.CREATOR,
-
-                    ),
-                    SettingsField(
-                        id="tts_model",
-                        type=SettingsFieldType.TEXT,
-                        label="Modelo TTS (texto → voz)",
-                        value="tts-1",
-                        placeholder="OpenAI: tts-1 ou tts-1-hd (usa a chave «OpenAI — STT e TTS»)",
-                        visibility=SettingsFieldVisibility.CREATOR,
-
-                    ),
-                    SettingsField(
-                        id="tts_voice",
-                        type=SettingsFieldType.SELECT,
-                        label="Voz TTS (OpenAI)",
-                        value="alloy",
-                        options=[
-                            SettingsSelectOption(value="alloy", label="Alloy"),
-                            SettingsSelectOption(value="echo", label="Echo"),
-                            SettingsSelectOption(value="fable", label="Fable"),
-                            SettingsSelectOption(value="onyx", label="Onyx"),
-                            SettingsSelectOption(value="nova", label="Nova"),
-                            SettingsSelectOption(value="shimmer", label="Shimmer"),
-                        ],
-                        visibility=SettingsFieldVisibility.CREATOR,
-                    ),
-                ],
-            ),
-            SettingsFieldGroup(
-                id="agent_settings",
-                label="Configurações gerais",
-                collapsible="closed",
-                fields=[
-                    SettingsField(
-                        id="persist_chat_attachments",
-                        type=SettingsFieldType.CHECKBOX,
-                        label="Guardar anexos do chat no armazenamento",
-                        value=False,
+                        label="Nome do agente",
+                        value="Assistente",
+                        placeholder="Ex: Bella, Sofia, Atendente Rede…",
                         visibility=SettingsFieldVisibility.CREATOR,
                     ),
                     SettingsField(
@@ -181,14 +85,15 @@ def build_settings_schema() -> SettingsSchema:
                         label="Modo de resposta",
                         value="text",
                         options=[
-                            SettingsSelectOption(value="text", label="Texto"),
-                            SettingsSelectOption(value="voz", label="Voz"),
+                            SettingsSelectOption(value="text", label="Somente texto"),
+                            SettingsSelectOption(value="voz", label="Somente voz"),
                             SettingsSelectOption(value="ambos", label="Texto e voz"),
                         ],
                         visibility=SettingsFieldVisibility.CREATOR,
                     ),
                 ],
             ),
+            # ── 2. Instruções ─────────────────────────────────────────────────
             SettingsFieldGroup(
                 id="agent_instructions",
                 label="Instruções",
@@ -204,6 +109,149 @@ def build_settings_schema() -> SettingsSchema:
                     ),
                 ],
             ),
+            # ── 3. WhatsApp ───────────────────────────────────────────────────
+            SettingsFieldGroup(
+                id="whatsapp",
+                label="WhatsApp",
+                collapsible="closed",
+                fields=[
+                    SettingsField(
+                        id="gestor_phone",
+                        type=SettingsFieldType.TEXT,
+                        label="Telefone do gestor (E.164)",
+                        placeholder="+5511999999999 — para notificações internas",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                    SettingsField(
+                        id="whatsapp_grupo_geral",
+                        type=SettingsFieldType.TEXT,
+                        label="ID do grupo geral de franqueados",
+                        placeholder="120363XXXXXXXXXX@g.us — usado no anúncio de treinamentos",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                ],
+            ),
+            # ── 4. Recrutamento ───────────────────────────────────────────────
+            SettingsFieldGroup(
+                id="recrutamento",
+                label="Recrutamento",
+                collapsible="closed",
+                fields=[
+                    SettingsField(
+                        id="link_avaliacao_comportamental",
+                        type=SettingsFieldType.TEXT,
+                        label="Link da avaliação comportamental (Tally)",
+                        placeholder="https://tally.so/r/XXXXXX — enviado ao candidato no primeiro contato",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                ],
+            ),
+            # ── 5. Banco de dados ─────────────────────────────────────────────
+            SettingsFieldGroup(
+                id="database",
+                label="Banco de dados (Supabase)",
+                collapsible="closed",
+                fields=[
+                    SettingsField(
+                        id="supabase_url",
+                        type=SettingsFieldType.TEXT,
+                        label="URL do projeto Supabase",
+                        placeholder="https://XXXXXXXXXXXX.supabase.co",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                    SettingsField(
+                        id="supabase_key",
+                        type=SettingsFieldType.PASSWORD,
+                        label="Chave de serviço Supabase (service_role)",
+                        placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9…",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                    SettingsField(
+                        id="tally_signing_secret",
+                        type=SettingsFieldType.PASSWORD,
+                        label="Segredo HMAC dos webhooks Tally",
+                        placeholder="Deixe vazio para desabilitar a verificação de assinatura (dev)",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                ],
+            ),
+            # ── 6. LLM ────────────────────────────────────────────────────────
+            SettingsFieldGroup(
+                id="llm",
+                label="LLM",
+                collapsible="closed",
+                fields=[
+                    SettingsField(
+                        id="llm_model",
+                        type=SettingsFieldType.SELECT,
+                        label="Modelo de chat (multimodal)",
+                        value="openai:gpt-4o-mini",
+                        options=_llm_model_select_options(),
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                    SettingsField(
+                        id="provider_azure_openai_endpoint",
+                        type=SettingsFieldType.TEXT,
+                        label="Endpoint Azure OpenAI (somente Azure)",
+                        placeholder="https://RESOURCE.openai.azure.com/",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                    SettingsField(
+                        id="provider_azure_openai_api_version",
+                        type=SettingsFieldType.TEXT,
+                        label="API version Azure OpenAI (somente Azure)",
+                        placeholder="2024-08-01-preview",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                    SettingsField(
+                        id="provider_api_key",
+                        type=SettingsFieldType.PASSWORD,
+                        label="Chave API do fornecedor de chat",
+                        placeholder="OpenAI, Gemini, Anthropic ou Azure — conforme modelo escolhido",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                    SettingsField(
+                        id="openai_api_key",
+                        type=SettingsFieldType.PASSWORD,
+                        label="Chave API OpenAI — STT / TTS / análise de currículos",
+                        required=True,
+                        placeholder="Obrigatória: transcrição de áudio, voz e análise de PDF usam GPT-4o",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                    SettingsField(
+                        id="stt_model",
+                        type=SettingsFieldType.TEXT,
+                        label="Modelo STT (áudio → texto)",
+                        value="gpt-4o-transcribe",
+                        placeholder="Ex: gpt-4o-transcribe, whisper-1",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                    SettingsField(
+                        id="tts_model",
+                        type=SettingsFieldType.TEXT,
+                        label="Modelo TTS (texto → voz)",
+                        value="tts-1",
+                        placeholder="OpenAI: tts-1 ou tts-1-hd",
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                    SettingsField(
+                        id="tts_voice",
+                        type=SettingsFieldType.SELECT,
+                        label="Voz TTS",
+                        value="alloy",
+                        options=[
+                            SettingsSelectOption(value="alloy", label="Alloy"),
+                            SettingsSelectOption(value="echo", label="Echo"),
+                            SettingsSelectOption(value="fable", label="Fable"),
+                            SettingsSelectOption(value="onyx", label="Onyx"),
+                            SettingsSelectOption(value="nova", label="Nova"),
+                            SettingsSelectOption(value="shimmer", label="Shimmer"),
+                        ],
+                        visibility=SettingsFieldVisibility.CREATOR,
+                    ),
+                ],
+            ),
+            # ── 7. Guardrails ─────────────────────────────────────────────────
             SettingsFieldGroup(
                 id="guardrails",
                 label="Guardrails",
@@ -219,44 +267,18 @@ def build_settings_schema() -> SettingsSchema:
                     ),
                 ],
             ),
+            # ── 8. Avançado ───────────────────────────────────────────────────
             SettingsFieldGroup(
-                id="knowledge",
-                label="Base de Conhecimento",
+                id="advanced",
+                label="Avançado",
                 collapsible="closed",
                 fields=[
                     SettingsField(
-                        id="rag_pipeline",
-                        type=SettingsFieldType.SELECT,
-                        label="Motor RAG — armazenamento da base",
-                        placeholder="Escolha o motor RAG para a base de conhecimento",
+                        id="persist_chat_attachments",
+                        type=SettingsFieldType.CHECKBOX,
+                        label="Guardar anexos do chat no armazenamento",
+                        value=False,
                         visibility=SettingsFieldVisibility.CREATOR,
-                        options=[
-                            SettingsSelectOption(value="openai", label="OpenAI Vector Store"),
-                            SettingsSelectOption(
-                                value="azure_ai_search",
-                                label="Azure AI Search",
-                            ),
-                        ],
-                    ),
-                    SettingsField(
-                        id="rag_azure_ai_search_endpoint",
-                        type=SettingsFieldType.TEXT,
-                        label="Azure AI Search ENDPOINT",
-                        placeholder="https://recurso.search.windows.net",
-                        visibility=SettingsFieldVisibility.CREATOR,
-                    ),
-                    SettingsField(
-                        id="rag_azure_ai_search_api_key",
-                        type=SettingsFieldType.PASSWORD,
-                        label="Azure AI Search — Admin Secret Key",
-                        visibility=SettingsFieldVisibility.CREATOR,
-                    ),
-                    SettingsField(
-                        id="base_de_conhecimento",
-                        type=SettingsFieldType.FILE_MULTI,
-                        label="ANEXOS — formato suportado: PDF, CSV, XLS, XLSX, DOCX, JSON",
-                        upload_url=f"{base}/settings-upload",
-                        accept=".pdf,.csv,.xlsx,.xls,.docx,.json",
                     ),
                 ],
             ),

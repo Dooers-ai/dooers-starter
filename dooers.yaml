@@ -1,24 +1,35 @@
 protocol_version: "2"
-name: My Dooers Agent
-description: Starter agent built with dooers-starter.
+name: WhatsApp Franquia
+description: Agente operacional para gestão de treinamentos e recrutamento de uma rede de franquias de estética.
 message_path: /
 message_scheme: wss
 whatsapp:
   enabled: true
   path: /whatsapp/inbound
 profile:
-  summary: Assistente com RAG, formulários e WhatsApp via Dooers.
+  summary: Assistente operacional via WhatsApp para franquias de estética — treinamentos e recrutamento.
   capabilities:
-    - chat multimodal
-    - base de conhecimento
-    - formulários na UI
-    - WhatsApp
+    - gestão de treinamentos e cronograma
+    - confirmação de presença via WhatsApp
+    - relatórios de presença
+    - pipeline de recrutamento
+    - análise de currículos com IA
+    - perfil comportamental de candidatos
+    - webhooks Tally para formulários
   tools:
-    - pesquisa documental
-    - coleta de feedback
+    - consultar cronograma de treinamentos
+    - enviar confirmações de presença
+    - relatório de presença por treinamento
+    - listar e ranquear candidatos
+    - analisar currículo via GPT-4o
+    - contatar candidatos via WhatsApp
 ui:
   suggested_prompts:
-    - title: O que você sabe?
-      prompt: O que você sabe sobre a empresa?
-    - title: Deixar feedback
-      prompt: Quero deixar um feedback sobre o atendimento
+    - title: Treinamentos do mês
+      prompt: Quais são os treinamentos previstos para este mês?
+    - title: Confirmar presença
+      prompt: Quero enviar confirmação de presença para o próximo treinamento
+    - title: Candidatos disponíveis
+      prompt: Mostre os candidatos disponíveis para as vagas abertas
+    - title: Relatório de presença
+      prompt: Gere o relatório de presença do último treinamento

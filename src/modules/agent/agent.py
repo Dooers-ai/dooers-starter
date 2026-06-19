@@ -1,18 +1,22 @@
 """
 AgentServer (Dooers SDK), audio cache, and WebSocket handler.
 
-See docs/01-anatomy.md for the full flow and extension points.
+Extends the starter with:
+- Unit YES/NO WhatsApp response detection (intercepts before agent flow)
+- Proactive WhatsApp dispatch via SDK agent_server.dispatch() after run_end
+- AgentRunContext construction
+- No feedback form (franchise agent)
 """
 
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 import os
-from collections.abc import Iterable
+import re
 from typing import Any
 
-from dooers.agents.server import AgentSend, AgentServer, ImagePart
+from dooers.agents.server import AgentSend, AgentServer, ImagePart, User
 from openai import AsyncOpenAI
 
 from src.config import settings as app_settings
@@ -28,13 +32,66 @@ from src.modules.llm.factory import (
     ensure_openai_audio_config,
     normalize_llm_provider,
 )
+from src.modules.services.supabase_client import get_supabase_client
+from src.modules.services.treinamentos_service import (
+    buscar_unidade_por_telefone,
+    listar_inscricoes_por_unidade,
+    registrar_resposta_presenca,
+)
 
-logger = logging.getLogger("dooers-starter.agent")
+logger = logging.getLogger("whatsapp-franquia.agent")
 
 if app_settings.tools_whatsapp_base_url:
     os.environ.setdefault("DOOERS_WHATSAPP_TOOLS_BASE", app_settings.tools_whatsapp_base_url.strip())
 
 agent_server = AgentServer(agent_config)
+
+# Normalised responses for YES/NO detection
+_SIM_VARIANTS = frozenset(
+    {
+        "sim", "s", "yes", "y", "ok", "confirmo", "confirmado", "confirmar",
+        "aceito", "aceitar", "vou", "presente", "estarei", "certo",
+        "✅", "👍",
+    }
+)
+_NAO_VARIANTS = frozenset(
+    {
+        "não", "nao", "n", "no", "recuso", "recusar", "cancelar", "cancelo",
+        "ausente", "impossível", "impossivel",
+        "❌", "👎",
+    }
+)
+
+
+async def _dispatch_whatsapp_proactive(
+    agent_id: str,
+    to_phone: str,
+    message: str,
+    instance_id: str,
+    agent_phone: str,
+) -> None:
+    """Fire-and-forget: send a proactive WhatsApp message via SDK dispatch."""
+    try:
+        stream = await agent_server.dispatch(
+            dooers_agent_handler,
+            agent_id,
+            message=message,
+            user=User(user_id=to_phone, user_name=""),
+            channel="whatsapp",
+            channel_meta={
+                "whatsapp": {
+                    "to_e164": to_phone,
+                    "from_e164": to_phone,
+                    "instance_id": instance_id,
+                    "agent_phone_e164": agent_phone,
+                },
+                "_proactive_notification": message,
+            },
+        )
+        async for _ in stream:
+            pass
+    except Exception:
+        logger.exception("_dispatch_whatsapp_proactive failed to=%s", to_phone)
 
 
 def _api_provider_wire(agent_settings: dict) -> str:
@@ -48,103 +105,141 @@ def _api_provider_wire(agent_settings: dict) -> str:
     return "openai_responses"
 
 
-def _parse_jsonish(value: Any) -> Any:
-    if not isinstance(value, str):
-        return value
-    text = value.strip()
-    if not text:
+def _get_whatsapp_meta(incoming: Any) -> dict:
+    """Extract the whatsapp sub-dict from channel_meta passed by whatsapp_channel.py."""
+    channel_meta = getattr(incoming.context, "channel_meta", None) or {}
+    if isinstance(channel_meta, dict):
+        return channel_meta.get("whatsapp") or {}
+    return {}
+
+
+def _is_whatsapp_channel(incoming: Any) -> bool:
+    """Return True if this message arrived via the WhatsApp channel."""
+    # Primary: channel attribute set by dispatch()
+    channel = getattr(incoming.context, "channel", None) or ""
+    if str(channel).lower() == "whatsapp":
+        return True
+    # Fallback: channel_meta contains 'whatsapp' key
+    return bool(_get_whatsapp_meta(incoming))
+
+
+def _get_whatsapp_sender_phone(incoming: Any) -> str:
+    """Extract sender E.164 phone from WhatsApp channel_meta (set by whatsapp_channel.py)."""
+    meta = _get_whatsapp_meta(incoming)
+    return str(meta.get("from_e164") or "").strip()
+
+
+def _normalizar_telefone(phone: str) -> str:
+    """Strip all non-digit characters, keep leading + if present."""
+    if not phone:
         return ""
+    phone = phone.strip()
+    if phone.startswith("+"):
+        return "+" + re.sub(r"\D", "", phone[1:])
+    return re.sub(r"\D", "", phone)
+
+
+def _detectar_resposta_unidade(text: str) -> str | None:
+    """Return 'sim', 'nao', or None based on message text."""
+    normalised = text.strip().lower().rstrip(".,!?;:")
+    if normalised in _SIM_VARIANTS:
+        return "sim"
+    if normalised in _NAO_VARIANTS:
+        return "nao"
+    return None
+
+
+async def _try_handle_unit_response(
+    incoming: Any,
+    analytics: Any,
+) -> tuple[bool, str]:
+    """
+    Try to interpret message as a franchise unit YES/NO response.
+
+    Returns (handled: bool, reply_text: str).
+    handled=True means we consumed the message and reply_text is the response to send.
+    handled=False means normal agent flow should continue.
+    """
+    if not _is_whatsapp_channel(incoming):
+        return False, ""
+
+    message_text = (incoming.message or "").strip()
+    if not message_text:
+        return False, ""
+
+    resposta = _detectar_resposta_unidade(message_text)
+    if resposta is None:
+        return False, ""
+
+    sender_phone_raw = _get_whatsapp_sender_phone(incoming)
+    if not sender_phone_raw:
+        return False, ""
+
+    sender_phone = _normalizar_telefone(sender_phone_raw)
+
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return value
+        supabase = await get_supabase_client()
+        unidade = await buscar_unidade_por_telefone(supabase, sender_phone)
+        if not unidade:
+            return False, ""
 
+        unidade_id = unidade.get("id") or ""
+        unidade_nome = unidade.get("nome") or sender_phone
 
-def _tool_outputs_by_name(items: Iterable[dict[str, Any]]) -> list[tuple[str, Any]]:
-    pending: dict[str, str] = {}
-    outputs: list[tuple[str, Any]] = []
-    for raw in items:
-        item_type = raw.get("type")
-        if item_type == "function_call":
-            call_id = str(raw.get("call_id") or raw.get("id") or "")
-            name = str(raw.get("name") or "tool")
-            if call_id:
-                pending[call_id] = name
-        elif item_type == "function_call_output":
-            call_id = str(raw.get("call_id") or "")
-            name = pending.pop(call_id, "tool")
-            outputs.append((name, _parse_jsonish(raw.get("output"))))
-    return outputs
+        inscricoes = await listar_inscricoes_por_unidade(supabase, unidade_id, apenas_pendentes=True)
+        if not inscricoes:
+            return False, ""
 
+        # Use the most recent pending inscription
+        inscricao = inscricoes[0]
+        inscricao_id = inscricao.get("id") or ""
+        treinamento_id = inscricao.get("cronograma_id") or ""
 
-def _feedback_form_requested(items: Iterable[dict[str, Any]]) -> bool:
-    for name, output in _tool_outputs_by_name(items):
-        if name == "request_feedback_form" and isinstance(output, dict) and output.get("requiresForm") is True:
-            return True
-    return False
+        ok = await registrar_resposta_presenca(supabase, inscricao_id, resposta)
 
+        if ok:
+            await analytics.track(
+                "unit.attendance_response",
+                data={
+                    "unidade_id": unidade_id,
+                    "treinamento_id": treinamento_id,
+                    "resposta": resposta,
+                },
+            )
+            if resposta == "sim":
+                reply = f"✅ Presença confirmada! Obrigado, *{unidade_nome}*. Até o treinamento!"
+            else:
+                reply = f"❌ Ausência registrada. Obrigado pelo retorno, *{unidade_nome}*."
+            return True, reply
+        else:
+            return False, ""
 
-def _feedback_form(send: AgentSend):
-    return send.form(
-        "Como foi sua experiência?",
-        [
-            send.form_select(
-                "rating",
-                label="Nota",
-                order=1,
-                required=True,
-                options=[
-                    {"value": "5", "label": "Excelente"},
-                    {"value": "4", "label": "Boa"},
-                    {"value": "3", "label": "Regular"},
-                    {"value": "2", "label": "Ruim"},
-                    {"value": "1", "label": "Péssima"},
-                ],
-            ),
-            send.form_text(
-                "comment",
-                label="Comentário (opcional)",
-                order=2,
-                required=False,
-                placeholder="Conte-nos o que podemos melhorar",
-            ),
-        ],
-        submit_label="Enviar feedback",
-        cancel_label="Cancelar",
-        size="medium",
-    )
-
-
-def _message_from_feedback_form(incoming: Any) -> str:
-    form_data = getattr(incoming, "form_data", None)
-    if not isinstance(form_data, dict):
-        return ""
-    rating = str(form_data.get("rating") or "").strip()
-    comment = str(form_data.get("comment") or "").strip()
-    if not rating:
-        return ""
-    parts = [f"Feedback recebido — nota: {rating}/5."]
-    if comment:
-        parts.append(f"Comentário: {comment}")
-    return " ".join(parts)
+    except Exception:
+        logger.exception("_try_handle_unit_response falhou sender=%s", sender_phone_raw)
+        return False, ""
 
 
 async def dooers_agent_handler(incoming, send, memory, analytics, settings):
-    """Main handler: normalize content, run workflow, emit UI events."""
+    """Main handler: normalize content, intercept unit YES/NO, run workflow, emit UI events."""
     agent_id = incoming.context.agent_id or ""
     agent_settings = await settings.get_all()
-    agent_display_name = agent_settings.get("agent_name") or app_settings.assistant_name or "AI Agent"
+    agent_display_name = agent_settings.get("agent_name") or app_settings.assistant_name or "Assistente"
 
     yield send.run_start(agent_id=agent_id)
 
-    if incoming.form_cancelled:
-        yield send.text("Feedback cancelado. Posso ajudar com mais alguma coisa?", author=agent_display_name)
+    # --- Proactive outbound dispatch: echo message directly, skip LLM ---
+    _ch_meta = getattr(incoming.context, "channel_meta", None) or {}
+    if isinstance(_ch_meta, dict) and "_proactive_notification" in _ch_meta:
+        notification_text = str(_ch_meta.get("_proactive_notification") or "").strip()
+        if notification_text:
+            yield send.text(notification_text, author=agent_display_name)
         yield send.run_end()
         return
 
-    form_message = _message_from_feedback_form(incoming)
-    if form_message:
-        incoming.message = form_message
+    if incoming.form_cancelled:
+        yield send.text("Operação cancelada. Posso ajudar com mais alguma coisa?", author=agent_display_name)
+        yield send.run_end()
+        return
 
     try:
         ensure_llm_provider_config(agent_settings)
@@ -159,6 +254,14 @@ async def dooers_agent_handler(incoming, send, memory, analytics, settings):
         yield send.run_end(status="failed", error="configuration_error")
         return
 
+    # --- Unit YES/NO WhatsApp interception ---
+    unit_handled, unit_reply = await _try_handle_unit_response(incoming, analytics)
+    if unit_handled:
+        yield send.text(unit_reply, author=agent_display_name)
+        yield send.run_end()
+        return
+
+    # --- Normal content processing ---
     content_parts = incoming.content or []
     oai: AsyncOpenAI = get_openai_audio_client(agent_settings)
 
@@ -253,11 +356,6 @@ async def dooers_agent_handler(incoming, send, memory, analytics, settings):
         yield send.run_end(status="failed", error="workflow_failed")
         return
 
-    if _feedback_form_requested(out.get("new_runner_items") or []):
-        yield _feedback_form(send)
-        yield send.run_end()
-        return
-
     reply = (out.get("reply") or "").strip()
     if not reply:
         reply = "Sem resposta do modelo."
@@ -274,3 +372,23 @@ async def dooers_agent_handler(incoming, send, memory, analytics, settings):
             await analytics.track("error.occurred", data={"stage": "tts"})
 
     yield send.run_end()
+
+    # --- Dispatch pending WhatsApp sends accumulated by tools during Runner.run() ---
+    pending_sends = out.get("pending_whatsapp_sends") or []
+    if pending_sends:
+        whatsapp_meta = _get_whatsapp_meta(incoming)
+        instance_id = str(whatsapp_meta.get("instance_id") or "").strip()
+        agent_phone = str(whatsapp_meta.get("agent_phone_e164") or "").strip()
+        for spec in pending_sends:
+            to_phone = str(spec.get("to_phone") or "").strip()
+            message = str(spec.get("message") or "").strip()
+            if to_phone and message:
+                asyncio.create_task(
+                    _dispatch_whatsapp_proactive(
+                        agent_id=agent_id,
+                        to_phone=to_phone,
+                        message=message,
+                        instance_id=instance_id,
+                        agent_phone=agent_phone,
+                    )
+                )
