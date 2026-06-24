@@ -25,6 +25,10 @@ class Settings(BaseSettings):
     api_agent_name: str = "dooers-starter"
     #: Root log level for the process (DEBUG, INFO, WARNING, …). Azure SDK / httpx stay at WARNING — see ``src.main.configure_logging``.
     logging_level: str = Field(default="INFO", validation_alias=AliasChoices("LOGGING_LEVEL"))
+    #: When True, configuration problems abort the process (``sys.exit(1)``) — useful locally to catch
+    #: misconfiguration early. When False (default) the process logs the problems and boots anyway so the
+    #: hosted deploy passes its readiness check; secret/DB-dependent features degrade until configured.
+    config_strict: bool = Field(default=False, validation_alias=AliasChoices("CONFIG_STRICT"))
 
     agent_database_host: str = Field(
         default="localhost",
@@ -159,9 +163,21 @@ def _validate(s: Settings) -> None:
     if not s.agent_database_name:
         errors.append("AGENT_DATABASE_NAME is not configured")
     if errors:
+        print("Configuration problems detected:", file=sys.stderr)
         for e in errors:
             print(f"  - {e}", file=sys.stderr)
-        sys.exit(1)
+        if s.config_strict:
+            # Fail fast (local dev / CI) so misconfiguration is caught before runtime.
+            sys.exit(1)
+        # Hosted deploy: the container must still boot and pass its readiness check.
+        # Missing secrets/DB degrade RAG/chat at request time rather than crash-looping
+        # the whole service. Provide the values via .env (uploaded by `dooers push`)
+        # or set CONFIG_STRICT=true to make these fatal.
+        print(
+            "  -> CONFIG_STRICT is false; continuing in degraded mode "
+            "(set the values in .env or CONFIG_STRICT=true to make these fatal).",
+            file=sys.stderr,
+        )
 
 
 settings = Settings()

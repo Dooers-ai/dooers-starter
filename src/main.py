@@ -54,15 +54,38 @@ API_PREFIX = settings.api_prefix
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await agent_server.ensure_initialized()
-    logger.info(
-        "Agents SDK ingest allowlist active: %s",
-        sorted(agent_server.allowed_content_types) if agent_server.allowed_content_types else None,
-    )
-    await init_pool()
+    # Startup must not crash the process when external infra (Postgres / the SDK's
+    # own store) is unreachable — otherwise the container never listens on $PORT and
+    # the hosted deploy fails its readiness check. Each step degrades independently:
+    # chat/persistence and RAG/threads stay unavailable until the DB is reachable, but
+    # the service boots and /health responds so the deploy succeeds.
+    try:
+        await agent_server.ensure_initialized()
+        logger.info(
+            "Agents SDK ingest allowlist active: %s",
+            sorted(agent_server.allowed_content_types) if agent_server.allowed_content_types else None,
+        )
+    except Exception:
+        logger.exception(
+            "agent_server.ensure_initialized() failed — continuing in DEGRADED mode "
+            "(chat/persistence unavailable until AGENT_DATABASE_* points to a reachable Postgres)"
+        )
+    try:
+        await init_pool()
+    except Exception:
+        logger.exception(
+            "Database init failed — continuing in DEGRADED mode "
+            "(RAG/threads unavailable until AGENT_DATABASE_* points to a reachable Postgres)"
+        )
     yield
-    await close_pool()
-    await agent_server.close()
+    try:
+        await close_pool()
+    except Exception:
+        logger.exception("close_pool() failed during shutdown")
+    try:
+        await agent_server.close()
+    except Exception:
+        logger.exception("agent_server.close() failed during shutdown")
 
 
 app = FastAPI(

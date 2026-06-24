@@ -1,3 +1,15 @@
+# Blueprint manifest read by `dooers push`.
+#
+# Before your FIRST push you must register the agent so the CLI can add the two
+# REQUIRED identity fields below (the protocol-v2 manifest schema rejects a push
+# without them):
+#
+#   agent_id:        <uuid>   # added by `dooers agents create`
+#   organization_id: <uuid>   # added by `dooers agents create`
+#
+# Run `dooers agents create --name "My Dooers Agent"` (or `dooers agents link`)
+# in this directory once, then keep the generated agent_id/organization_id here.
+# Do not invent these by hand — they must match real records in the platform.
 protocol_version: "2"
 name: My Dooers Agent
 description: Starter agent built with dooers-starter.
