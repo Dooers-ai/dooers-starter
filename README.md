@@ -80,7 +80,10 @@ dooers login
 dooers push
 ```
 
-O CLI lê `dooers.yaml` e o `Dockerfile`. Variáveis de produção vão no painel/Studio — **nunca** commite `.env`.
+O CLI lê `dooers.yaml` e o `Dockerfile`. As variáveis de produção (incluindo `OPENAI_API_KEY` e
+`AGENT_DATABASE_*`) devem estar no `.env` da raiz: **o `dooers push` envia o `.env`** e injeta cada
+linha como variável de ambiente no runtime. O `.gitignore` mantém o `.env` fora do git, mas o push
+**ainda o envia** — portanto preencha-o com valores de produção e **nunca** o commite.
 
 **Guia completo:** [docs/08-deploy.md](docs/08-deploy.md) (checklist, pós-deploy no Studio, CI, prompt para Cursor).
 

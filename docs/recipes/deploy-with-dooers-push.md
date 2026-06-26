@@ -8,16 +8,18 @@ O criador já tem:
 
 - Projeto clonado deste starter
 - Conta Dooers com Studio
-- Postgres de produção acessível pelo runtime
+- Postgres de produção acessível pelo runtime (o agente conecta no startup)
 - `dooers-cli` instalável (`pip install dooers-cli`)
+- Agente registrado com `dooers agents create` (grava `agent_id` + `organization_id` no `dooers.yaml`)
 
 ## Checklist da IA antes de sugerir push
 
 ```
-[ ] dooers.yaml — name e description atualizados
-[ ] API_AGENT_NAME em .env.example alinhado ao nome do serviço
-[ ] Dockerfile presente na raiz
-[ ] Nenhum segredo em ficheiros tracked (git status limpo de .env / *.json keys)
+[ ] dooers.yaml — name/description atualizados E agent_id/organization_id presentes (dooers agents create)
+[ ] Dockerfile escuta em $PORT (--port ${PORT:-8080}), não numa porta fixa
+[ ] .env preenchido com OPENAI_API_KEY + AGENT_DATABASE_* (é ENVIADO pelo push; nunca commitar)
+[ ] API_AGENT_NAME no .env alinhado ao nome do serviço
+[ ] Nenhum segredo em ficheiros tracked no git (git status limpo de .env / *.json keys)
 [ ] uv run poe check passa
 [ ] README/docs não referenciam credenciais reais
 ```
@@ -43,8 +45,8 @@ A IA pode preparar o projeto; **login e push exigem credenciais do criador**.
 > 4. Ative o blueprint e contrate num time
 > 5. (Opcional) Conecte WhatsApp no painel de canais
 >
-> Variáveis no painel de deploy do runtime:
-> - `AGENT_DATABASE_*`
+> Variáveis que precisam estar no `.env` ANTES do push (o push envia o `.env` e injeta no runtime):
+> - `AGENT_DATABASE_*` (apontando para um Postgres acessível)
 > - `OPENAI_API_KEY`
 > - `SERVICE_URL=https://<host>`
 > - `API_ENVIRONMENT=prod`
@@ -70,7 +72,7 @@ No final, imprima os 3 comandos que eu devo executar no terminal.
 
 | Erro do `dooers validate` | Fix |
 |---------------------------|-----|
-| `dooers.yaml` inválido | Corrigir YAML, `protocol_version: "2"` |
+| `dooers.yaml` inválido / faltam `agent_id`/`organization_id` | `protocol_version: "2"` + rodar `dooers agents create` |
 | Dockerfile missing | Usar o Dockerfile do starter |
-| Port mismatch | `EXPOSE 8005` + `HTTP_PORT=8005` |
+| Port mismatch | `CMD` deve escutar em `$PORT` (Cloud Run injeta 8080): `--port ${PORT:-8080}` — **não** fixar 8005 |
 | Handler path | WebSocket em `{api_prefix}/ws` via `main.py` |

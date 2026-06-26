@@ -12,18 +12,24 @@ dooers validate                 # valida dooers.yaml + Dockerfile (opcional)
 dooers push                     # build da imagem + deploy + registro do blueprint
 ```
 
-Depois do push: configurar secrets e URL no **Studio** (ver [Pós-deploy](#pós-deploy-no-studio)).
+Antes do push: preencha o `.env` (segredos vão por aí — ver aviso abaixo). Depois do push: ligar o
+blueprint à URL do WebSocket no **Studio** (ver [Pós-deploy](#pós-deploy-no-studio)).
 
 ---
 
 ## O que o `dooers push` faz
 
-O CLI **não** envia o seu `.env` nem ficheiros locais de credenciais. Em alto nível:
+> ⚠️ **Segredos:** o `dooers push` **envia o `.env`** da raiz e injeta cada linha como variável de
+> ambiente no runtime. Esse é hoje o **único** caminho para `OPENAI_API_KEY`, `AGENT_DATABASE_*` etc.
+> chegarem ao container — não existe painel de secrets que faça essa injeção. O `.gitignore` mantém o
+> `.env` fora do git, mas o push **ainda o envia**. Preencha-o com valores de produção e nunca o commite.
 
-1. Lê `dooers.yaml` na raiz do projeto
-2. Faz build da imagem com o `Dockerfile`
+Em alto nível, o CLI:
+
+1. Lê `dooers.yaml` na raiz do projeto (precisa de `agent_id` + `organization_id` — ver pré-requisitos)
+2. Arquiva o projeto (incluindo o `.env`) e faz build da imagem com o `Dockerfile`
 3. Publica a imagem no registry da plataforma
-4. Sobe/atualiza o runtime do agente (container)
+4. Sobe/atualiza o runtime do agente (container), injetando as variáveis do `.env`
 5. Registra ou atualiza o blueprint com metadados do `dooers.yaml`
 
 O agente em produção expõe as mesmas rotas que em local:
@@ -50,14 +56,17 @@ Antes do primeiro `dooers push`, confirme:
 - [ ] `dooers-cli` instalado (`dooers --version`)
 - [ ] Docker disponível localmente **ou** build remoto feito pelo CLI (depende da versão do CLI)
 - [ ] Projeto baseado neste starter (ou equivalente com `dooers.yaml` + `Dockerfile`)
+- [ ] Agente registrado: `dooers agents create --name "<nome>"` rodado uma vez nesta pasta, para
+      gravar `agent_id` + `organization_id` no `dooers.yaml` (o push é rejeitado sem eles)
 
 ### Ficheiros na raiz (obrigatórios para o CLI)
 
 | Ficheiro | Função |
 |----------|--------|
-| `dooers.yaml` | Nome, descrição, perfil, flags WhatsApp, prompts sugeridos |
-| `Dockerfile` | Imagem de produção (Python 3.11 + uvicorn) |
+| `dooers.yaml` | Metadados do blueprint — **requer** `agent_id` + `organization_id` (de `dooers agents create`) |
+| `Dockerfile` | Imagem de produção — deve escutar em `$PORT` (Cloud Run injeta 8080), não numa porta fixa |
 | `pyproject.toml` | Dependências Python (`dooers-agents-server`, etc.) |
+| `.env` | Variáveis de produção — **enviado pelo `dooers push`** e injetado no runtime (nunca commitar) |
 
 ### Ficheiros que **nunca** devem ir para o git
 
@@ -67,17 +76,21 @@ Antes do primeiro `dooers push`, confirme:
 
 Estão no `.gitignore`. A IA **não deve** adicionar estes ficheiros ao commit.
 
-### Infra de produção (configurar na plataforma, não no push)
+### Infra de produção (no `.env`, enviado pelo push)
+
+Estas variáveis vão no `.env` da raiz — o `dooers push` as injeta no runtime. Sem `OPENAI_API_KEY` o
+RAG fica indisponível; sem um `AGENT_DATABASE_*` apontando para um Postgres acessível, chat/threads
+ficam indisponíveis (o serviço sobe em modo degradado, mas não funciona de verdade).
 
 | Recurso | Onde configurar |
 |---------|-----------------|
-| PostgreSQL | Painel de deploy / variáveis do runtime |
-| `OPENAI_API_KEY` | Secrets do runtime (RAG + STT/TTS) |
-| `AGENT_DATABASE_*` | Secrets do runtime |
-| `SERVICE_URL` | URL pública HTTPS do agente deployado |
-| `API_ENVIRONMENT=prod` | Variável de ambiente |
-| `API_AGENT_NAME` | Nome estável do serviço (alinhar com URL) |
-| GCS/Azure (opcional) | Secrets + `STORE_*` flags |
+| PostgreSQL acessível pelo runtime | Provisione você (DB gerenciado) e aponte `AGENT_DATABASE_*` para ele |
+| `OPENAI_API_KEY` | `.env` (RAG + STT/TTS) |
+| `AGENT_DATABASE_*` | `.env` (host/port/user/password/name do seu Postgres) |
+| `SERVICE_URL` | `.env` — URL pública HTTPS do agente deployado |
+| `API_ENVIRONMENT=prod` | `.env` |
+| `API_AGENT_NAME` | `.env` — nome estável do serviço (alinhar com URL) |
+| GCS/Azure (opcional) | `.env` — credenciais + flags `STORE_*` |
 
 Chaves LLM de chat (`provider_api_key`) vão no **Studio** (settings do blueprint), não no Dockerfile.
 
@@ -85,12 +98,18 @@ Chaves LLM de chat (`provider_api_key`) vão no **Studio** (settings do blueprin
 
 ## Passo a passo — primeiro deploy
 
-### 1. Personalizar `dooers.yaml`
+### 1. Registrar e personalizar `dooers.yaml`
 
-Edite nome, descrição e perfil antes do push:
+Registre o agente uma vez (grava `agent_id` + `organization_id`), depois edite nome, descrição e perfil:
+
+```bash
+dooers agents create --name "Suporte ACME"   # adiciona agent_id + organization_id ao dooers.yaml
+```
 
 ```yaml
 protocol_version: "2"
+agent_id: <uuid>            # ← gerado por `dooers agents create` (obrigatório)
+organization_id: <uuid>     # ← gerado por `dooers agents create` (obrigatório)
 name: Suporte ACME          # ← nome visível no marketplace/studio
 description: Agente de suporte da ACME
 whatsapp:
@@ -98,9 +117,10 @@ whatsapp:
   path: /whatsapp/inbound
 ```
 
-### 2. Ajustar `.env` de produção (referência)
+### 2. Ajustar `.env` de produção
 
-Use `.env.example` como modelo. Em produção, as mesmas chaves viram **variáveis de ambiente** no painel — não commite `.env`.
+Use `.env.example` como modelo. O `dooers push` **envia o `.env`** e injeta cada chave como variável de
+ambiente no runtime — preencha com valores de produção e nunca commite o ficheiro.
 
 Mínimo para produção:
 
@@ -213,11 +233,14 @@ Gere `DOOERS_API_TOKEN` no painel da organização (Settings → API / CLI token
 | Problema | Causa provável | Ação |
 |----------|----------------|------|
 | `dooers: command not found` | CLI não instalado | `pip install dooers-cli` ou `uv tool install dooers-cli` |
+| Push rejeitado (`field required: agent_id` / `organization_id`) | `dooers.yaml` sem identidade | Rode `dooers agents create` nesta pasta antes do push |
 | `unauthorized` no push | Sessão expirada | `dooers login` de novo |
 | Build Docker falha | Dependência de sistema | Ajuste `Dockerfile` (ex.: `libpq-dev` para Postgres) |
+| Deploy falha: "container failed to start and listen on PORT 8080" | Dockerfile escuta porta fixa | `CMD` deve usar `--port ${PORT:-8080}` (não 8005) |
+| Deploy "sobe" mas a URL dá 503 / crash-loop | Faltou `OPENAI_API_KEY` ou `AGENT_DATABASE_*` no `.env` | Preencha o `.env` (é enviado pelo push) e re-deploy |
 | Health OK mas chat não conecta | Messages URL errada | Confira `wss://` + `api_prefix` + `/ws` |
 | Agente sobe mas LLM não responde | Settings vazias | Configure LLM + API key no Studio |
-| RAG não indexa | `OPENAI_API_KEY` ausente no runtime | Secret no painel de deploy |
+| RAG não indexa | `OPENAI_API_KEY` ausente no runtime | Inclua `OPENAI_API_KEY` no `.env` (enviado pelo push) |
 | WhatsApp não chega | HMAC / URL inbound | `whatsapp.enabled: true` no yaml; URL correta no provisionamento |
 
 ---
@@ -230,7 +253,7 @@ Gere `DOOERS_API_TOKEN` no painel da organização (Settings → API / CLI token
 - Ajustar `Dockerfile` e `pyproject.toml`
 - Correr `uv run poe check` e corrigir lint
 - Correr `dooers validate` e corrigir erros estruturais
-- Documentar variáveis de ambiente necessárias para o criador colar no painel
+- Listar as variáveis de ambiente necessárias para o criador preencher no `.env` (enviado pelo push)
 
 ### O que a IA **não deve** fazer
 
