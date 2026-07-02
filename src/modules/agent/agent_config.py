@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal, cast
+
 from dooers.agents.server import AgentConfig
 
 from src.config import settings
@@ -11,8 +13,17 @@ from src.modules.rag.knowledge_settings_hook import on_settings_updated
 _raw_ca = (getattr(settings, "chat_storage_service", None) or "none").strip().lower()
 _ca_storage = _raw_ca if _raw_ca in {"none", "gcp", "azure"} else "none"
 
+# "postgres" (padrão) ou "dooers" (banco gerenciado pela Dooers, via env
+# AGENT_DATABASE_TYPE). Local fica postgres; no deploy gerenciado, defina
+# AGENT_DATABASE_TYPE=dooers no env.prod — ver README "Banco gerenciado".
+_raw_db = (settings.agent_database_type or "postgres").strip().lower()
+_db_type = cast(
+    "Literal['postgres', 'cosmos', 'dooers']",
+    _raw_db if _raw_db in {"postgres", "cosmos", "dooers"} else "postgres",
+)
+
 agent_config = AgentConfig(
-    database_type="postgres",
+    database_type=_db_type,
     assistant_name=settings.assistant_name,
     database_host=settings.agent_database_host,
     database_port=settings.agent_database_port,

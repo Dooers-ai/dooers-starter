@@ -81,11 +81,26 @@ dooers push
 ```
 
 O CLI lê `dooers.yaml` e o `Dockerfile`. As variáveis de produção (incluindo `OPENAI_API_KEY` e
-`AGENT_DATABASE_*`) devem estar no `.env` da raiz: **o `dooers push` envia o `.env`** e injeta cada
-linha como variável de ambiente no runtime. O `.gitignore` mantém o `.env` fora do git, mas o push
-**ainda o envia** — portanto preencha-o com valores de produção e **nunca** o commite.
+`AGENT_DATABASE_*`) devem estar num arquivo **`env.prod`** na raiz: o `dooers push` envia o projeto e
+o deploy injeta cada linha do `env.prod` como variável de ambiente no runtime. (O `.env` local **não**
+é enviado — ele fica só para o dev local.) Nunca commite `env.prod`.
 
 **Guia completo:** [docs/08-deploy.md](docs/08-deploy.md) (checklist, pós-deploy no Studio, CI, prompt para Cursor).
+
+## Banco gerenciado pela Dooers (opcional)
+
+Em vez de fornecer seu próprio PostgreSQL (`AGENT_DATABASE_*`), a plataforma pode provisionar um
+banco **por agente** (AlloyDB), conectado via **IAM, sem senha**. Três passos:
+
+1. No `dooers.yaml`: `database: { type: dooers }` → o `dooers push` provisiona o banco.
+2. No `env.prod`: `AGENT_DATABASE_TYPE=dooers` → o SDK conecta via IAM no runtime.
+3. Dependência (já no starter): `dooers-agents-server[dooers]>=0.13.1`.
+
+O deploy injeta `AGENT_DATABASE_INSTANCE`/`USER`/`NAME` automaticamente — não configure host/senha.
+O `.env` local continua com `AGENT_DATABASE_TYPE=postgres` (ou omitido), então o dev local segue no
+seu Postgres. **Atenção:** o banco gerenciado elimina só o `AGENT_DATABASE_*` do `env.prod` — as
+chaves de LLM (`OPENAI_API_KEY`, …) continuam sendo necessárias lá. A organização precisa estar
+habilitada para hosting/banco gerenciado na Dooers.
 
 ```bash
 dooers validate   # opcional — valida yaml + Dockerfile antes do push

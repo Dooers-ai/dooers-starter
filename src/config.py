@@ -30,6 +30,13 @@ class Settings(BaseSettings):
     #: hosted deploy passes its readiness check; secret/DB-dependent features degrade until configured.
     config_strict: bool = Field(default=False, validation_alias=AliasChoices("CONFIG_STRICT"))
 
+    #: "postgres" (padrão — banco do criador via AGENT_DATABASE_*) ou "dooers"
+    #: (banco gerenciado pela Dooers — AlloyDB via IAM, sem senha; requer também
+    #: `database.type: dooers` no dooers.yaml). Ver README "Banco gerenciado".
+    agent_database_type: str = Field(
+        default="postgres",
+        validation_alias=AliasChoices("AGENT_DATABASE_TYPE"),
+    )
     agent_database_host: str = Field(
         default="localhost",
         validation_alias=AliasChoices("AGENT_DATABASE_HOST"),

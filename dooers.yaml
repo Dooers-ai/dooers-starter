@@ -1,36 +1,23 @@
-# Blueprint manifest read by `dooers push`.
-#
-# Before your FIRST push you must register the agent so the CLI can add the two
-# REQUIRED identity fields below (the protocol-v2 manifest schema rejects a push
-# without them):
-#
-#   agent_id:        <uuid>   # added by `dooers agents create`
-#   organization_id: <uuid>   # added by `dooers agents create`
-#
-# Run `dooers agents create --name "My Dooers Agent"` (or `dooers agents link`)
-# in this directory once, then keep the generated agent_id/organization_id here.
-# Do not invent these by hand — they must match real records in the platform.
 protocol_version: "2"
-name: My Dooers Agent
+agent_id: bae9ac1d-0f42-4916-b218-9e2c09a047cb
+organization_id: e7d3594c-f61f-49c7-a4a0-ca288dd0619e
+name: starter-deploy-test
 description: Starter agent built with dooers-starter.
 message_path: /
 message_scheme: wss
+# "postgres" (padrão): você fornece o banco via AGENT_DATABASE_* no env.prod.
+# "dooers": banco gerenciado pela Dooers (provisionado no push; ver README).
+database:
+  type: postgres
 whatsapp:
   enabled: true
   path: /whatsapp/inbound
 profile:
-  summary: Assistente com RAG, formulários e WhatsApp via Dooers.
+  summary: Assistente com RAG, formularios e WhatsApp via Dooers.
   capabilities:
     - chat multimodal
     - base de conhecimento
-    - formulários na UI
-    - WhatsApp
-  tools:
-    - pesquisa documental
-    - coleta de feedback
 ui:
   suggested_prompts:
-    - title: O que você sabe?
-      prompt: O que você sabe sobre a empresa?
-    - title: Deixar feedback
-      prompt: Quero deixar um feedback sobre o atendimento
+    - title: O que voce sabe?
+      prompt: O que voce sabe sobre a empresa?
