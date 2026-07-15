@@ -18,16 +18,25 @@ alwaysApply: true
 
 ## SDK contract
 
-- Package: `dooers-agents-server` (`from dooers.agents.server import ...`)
+- Package: `dooers-agents-server[dooers,observability]>=0.16.1` (`from dooers.agents.server import ...`)
 - Every turn: `yield send.run_start()` … `yield send.run_end()`
 - Persist threads via SDK — never write SQL for messages/events
+- UI extras: `send.chart(...)`, `send.reasoning(...)` — see `docs/09-charts.md`
+- OTel: installed via `[observability]`; no GCP exporter keys — see `docs/10-observability.md`
 - Read `docs/02-sdk-contract.md` before changing handler signatures
+
+## Best practices (developer agents)
+
+- **Credentials:** if an integration needs account/auth/billing, ask whether the user already has an account; ask env vs settings schema vs chat form; explain auth formats the tool supports. Never hardcode keys. Recipe: `docs/recipes/external-service-credentials.md`
+- **Test before push:** `uv run poe check` (+ optional `poe dev` / ngrok against local Dooers) before suggesting `dooers push`
+- **Audiences:** prefer distinct workflows by `organization_role` / `workspace_role` and/or `channel` (e.g. analytics/config for owner|manager)
 
 ## Do NOT
 
 - Commit secrets (`.env`, API keys, service account JSON)
 - Reimplement WebSocket protocol or WhatsApp HMAC — use SDK helpers
 - Reference or import private Dooers codebases — use only this starter and public packages (`dooers-agents-server`, `dooers-agents-client`, `dooers-cli`)
+- Skip credential onboarding questions or push without lint/local checks
 
 ## When adding features
 
@@ -37,6 +46,7 @@ alwaysApply: true
 | Studio field | `schemas.py` |
 | RAG field | `schemas.py`, optional allowlist in capability |
 | Form | tool in capability + form builders in `agent.py` |
+| Chart | `yield send.chart(...)` (optionally role-gated) |
 | External channel | `dispatch()` or `channels/` |
 
 ## Code style
@@ -47,14 +57,15 @@ alwaysApply: true
 
 ## Deploy
 
-Read `docs/08-deploy.md` before suggesting deploy. The creator runs `dooers login` and `dooers push` — do not commit secrets or run push without their credentials.
+Read `docs/08-deploy.md` before suggesting deploy. The creator runs `dooers login` and `dooers push` — do not commit secrets or run push without their credentials. Finish `poe check` (and optional qualitative local test) first.
 
 Recipe: `docs/recipes/deploy-with-dooers-push.md`
 
 ## Reference docs (read first)
 
-0. `skills.md` — full agent creation workflow (integrations, deploy)
+0. `skills.md` — full agent creation workflow (integrations, deploy, best practices)
 1. `docs/01-anatomy.md`
 2. `docs/03-capabilities.md`
 3. `docs/02-sdk-contract.md`
 4. `docs/08-deploy.md` — when deploy is requested
+5. `docs/09-charts.md` / `docs/10-observability.md` — when relevant

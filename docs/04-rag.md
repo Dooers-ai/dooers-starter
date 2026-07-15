@@ -53,7 +53,27 @@ Cada capability pode ter allowlist diferente — ver `feedback.py`.
 
 `migrations/001_agent_rag.sql` — tabelas `agent_knowledge_files`, `agent_rag_vector_store`.
 
-Aplicadas no startup via `src/database/pool.py`.
+Aplicadas no startup via `src/database/pool.py` quando `APP_POSTGRES_POOL_ENABLED=true`.
+
+## Dois caminhos de banco (importante no deploy)
+
+O starter separa **persistência do SDK** (threads, settings, eventos) do **pool SQL do app** (metadados RAG):
+
+| Caminho | Env / código | Banco gerenciado (`AGENT_DATABASE_TYPE=dooers`) |
+|---------|--------------|--------------------------------------------------|
+| SDK | `agent_server.ensure_initialized()` | AlloyDB via IAM — funciona no Cloud Run |
+| App pool | `init_pool()` / `APP_POSTGRES_POOL_ENABLED` | Desligado por padrão recomendado — DSN com senha não funciona com user IAM |
+
+Com `database.type: dooers` no `dooers.yaml`, defina no `env.prod`:
+
+```bash
+AGENT_DATABASE_TYPE=dooers
+APP_POSTGRES_POOL_ENABLED=false
+```
+
+Chat e threads via SDK funcionam. `/settings-upload` que grava metadados nas tabelas SQL do starter
+fica indisponível até suporte futuro ao pool em AlloyDB — ou use Postgres próprio com
+`APP_POSTGRES_POOL_ENABLED=true` e `AGENT_DATABASE_*` preenchidos.
 
 ## Extensões permitidas
 

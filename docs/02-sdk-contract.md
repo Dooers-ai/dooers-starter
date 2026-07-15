@@ -37,6 +37,9 @@ async def handler(incoming, send, memory, analytics, settings):
 | `send.run_start()` | Inicia run (obrigatório) |
 | `send.run_end(status=...)` | Finaliza run |
 | `send.text(content, author=...)` | Mensagem assistente |
+| `send.reasoning(text, author=...)` | Bloco colapsável de raciocínio (não entra no histórico LLM) |
+| `send.chart(...)` | Gráfico BI na UI (`bar`, `line`, `pie`, …) — ver [09-charts.md](09-charts.md) |
+| `send.chart_series(key, label=..., color=...)` | Metadados de série para `send.chart` |
 | `send.audio(url=..., mime_type=...)` | Áudio TTS |
 | `send.form(message, elements, ...)` | Formulário na UI |
 | `send.form_text(name, ...)` | Elemento do form (helper) |
@@ -45,6 +48,35 @@ async def handler(incoming, send, memory, analytics, settings):
 | `send.whatsapp.text(...)` | Resposta só WhatsApp (opcional; `send.text` também roteia) |
 
 Cada `yield` é **gravado na thread** e enviado ao cliente.
+
+### Exemplo — chart + reasoning
+
+```python
+yield send.reasoning("Agregando vendas por região…")
+yield send.chart(
+    chart_type="bar_horizontal",
+    data=[{"region": "North", "sales": 320}, {"region": "South", "sales": 280}],
+    x_key="region",
+    y_keys=["sales"],
+    title="Sales by Region",
+    size="medium",
+)
+```
+
+## Roles e canal no `incoming`
+
+Use roles e canal para escolher workflows distintos (ex.: BI só para owners):
+
+| Campo | Valores típicos |
+|-------|-----------------|
+| `incoming.context.user.organization_role` | `owner` \| `manager` \| `member` |
+| `incoming.context.user.workspace_role` | `manager` \| `member` |
+| `incoming.context.user.system_role` | `admin` \| `user` |
+| `incoming.context.channel` | `dooers-platform`, `whatsapp`, … |
+
+## Observability (OTel)
+
+Com o extra `[observability]` (§ [10-observability.md](10-observability.md)), o SDK exporta traces por turno automaticamente após o seed da runtime API key.
 
 ## `memory` — histórico
 

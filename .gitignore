@@ -6,6 +6,9 @@ __pycache__/
 .env.local
 .env.*
 !.env.example
+env.prod
+env.*
+!env.prod.example
 gcp-service-account.json
 *-service-account*.json
 **/credentials*.json

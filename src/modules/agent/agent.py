@@ -18,6 +18,7 @@ from openai import AsyncOpenAI
 from src.config import settings as app_settings
 from src.modules.agent.agent_config import agent_config
 from src.modules.agent.workflow import run_workflow
+from src.modules.helpers.chart_demo import handle_chart_test, is_chart_test_command
 from src.modules.helpers.speech import generate_speech, stt_model
 from src.modules.helpers.wire_content import incoming_parts_to_wire_content_dicts
 from src.modules.helpers.error_messages import GENERIC_USER_ERROR_MESSAGE
@@ -136,6 +137,13 @@ async def dooers_agent_handler(incoming, send, memory, analytics, settings):
     agent_display_name = agent_settings.get("agent_name") or app_settings.assistant_name or "AI Agent"
 
     yield send.run_start(agent_id=agent_id)
+
+    # Local/Studio smoke test for send.chart (see docs/09-charts.md).
+    if is_chart_test_command(incoming.message or ""):
+        async for event in handle_chart_test(incoming.message or "", send):
+            yield event
+        yield send.run_end()
+        return
 
     if incoming.form_cancelled:
         yield send.text("Feedback cancelado. Posso ajudar com mais alguma coisa?", author=agent_display_name)

@@ -40,7 +40,10 @@ Aplicação FastAPI. Registra:
 | `POST /settings-upload` | Ficheiros RAG |
 | `POST /whatsapp/inbound` | Mensagens WhatsApp (HMAC) |
 
-Todas as rotas de agente ficam sob `{api_prefix}` = `/api/{env}/{agent-name}`.
+As rotas de agente ficam na raiz `/` (padrão `USE_API_PREFIX=false`), casando com `message_path: /` e o
+strip de prefixo do load balancer (`https://agents.dooers.ai/<agent-id>/…` → `/…`). O modo
+`USE_API_PREFIX=true` (rotas sob `/api/{env}/{agent-name}`) existe só para dev local com vários agentes
+atrás de um proxy compartilhado — não use em deploy hospedado.
 
 ### `src/modules/agent/agent.py` — Handler
 

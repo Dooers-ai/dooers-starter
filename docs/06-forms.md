@@ -57,6 +57,12 @@ await submit({ rating: "5", comment: "Ótimo!" });
 
 O chat na **UI Dooers** (dashboard e public chat) renderiza formulários automaticamente via `dooers-agents-client`.
 
+## Capturar credenciais de serviços externos
+
+Um uso comum de formulário: quando falta a chave de API de um serviço externo, o runtime pede a credencial
+no chat e grava em settings com `settings.set(...)`. Ver
+[recipes/external-service-credentials.md](recipes/external-service-credentials.md).
+
 ## Boas práticas
 
 - Um formulário por turno — depois `run_end()`

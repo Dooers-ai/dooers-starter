@@ -17,8 +17,14 @@ class Settings(BaseSettings):
         default=8000,
         validation_alias=AliasChoices("HTTP_PORT", "PORT"),
     )
+    #: Mount every agent route under ``/api/{env}/{name}``. Defaults to False so the
+    #: app serves at ``/`` — this is what a hosted deploy needs, because the Dooers
+    #: load balancer routes ``https://agents.dooers.ai/<agent-id>/…`` and STRIPS the
+    #: ``/<agent-id>`` prefix before forwarding, so the agent always sees ``/…`` (this
+    #: also matches ``message_path: /`` in ``dooers.yaml``). Only enable it for local
+    #: multi-agent routing behind a shared reverse proxy.
     use_prefix: bool = Field(
-        default=True,
+        default=False,
         validation_alias=AliasChoices("USE_API_PREFIX"),
     )
     api_environment: str = "dev"
@@ -60,6 +66,13 @@ class Settings(BaseSettings):
     agent_database_ssl: bool | str = Field(
         default=False,
         validation_alias=AliasChoices("AGENT_DATABASE_SSL"),
+    )
+    #: Optional asyncpg pool for app RAG tables (``agent_rag_vector_store``, etc.) — separate
+    #: from the SDK persistence store. Disable when using ``AGENT_DATABASE_TYPE=dooers`` (managed
+    #: AlloyDB via IAM) or when the agent does not need SQL-backed RAG metadata.
+    app_postgres_pool_enabled: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("APP_POSTGRES_POOL_ENABLED"),
     )
 
     # Required for RAG (Vector Store + OpenAI file ingest). Not user-configurable.
@@ -111,6 +124,19 @@ class Settings(BaseSettings):
     )
     service_url: str = Field(default="https://agent-dooers.ngrok.app", validation_alias=AliasChoices("SERVICE_URL"))
     agent_seed_secret: str = Field(default="", validation_alias=AliasChoices("AGENT_SEED_SECRET"))
+    # Observability — optional overrides of SDK platform defaults (empty → api.dooers.ai / observability.dooers.ai).
+    agent_core_base_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("AGENT_CORE_BASE_URL"),
+    )
+    agent_otel_service_url: str = Field(
+        default="",
+        validation_alias=AliasChoices("AGENT_OTEL_SERVICE_URL"),
+    )
+    otel_service_name: str = Field(
+        default="",
+        validation_alias=AliasChoices("OTEL_SERVICE_NAME"),
+    )
     #: Overrides SDK default tools URL for ``dooers_whatsapp_service`` outbound.
     #: Can include path prefix (e.g. https://services.dooers.ai/whatsapp).
     tools_whatsapp_base_url: str = Field(
@@ -167,7 +193,32 @@ def _validate(s: Settings) -> None:
         errors.append(
             "RAG_STORAGE_SERVICE='azure' requires AZURE_STORAGE_CONNECTION_STRING and AZURE_STORAGE_CONTAINER"
         )
-    if not s.agent_database_name:
+    db_type = (s.agent_database_type or "").strip().lower()
+    if db_type == "dooers":
+        if s.agent_database_host.strip().lower() in {"localhost", "127.0.0.1"}:
+            print(
+                "  ! AGENT_DATABASE_HOST=localhost with AGENT_DATABASE_TYPE=dooers — "
+                "remove host/port/user/password from env.prod; the platform injects AlloyDB "
+                "connection fields on deploy.",
+                file=sys.stderr,
+            )
+        if s.google_application_credentials.strip():
+            print(
+                "  ! GOOGLE_APPLICATION_CREDENTIALS is set with AGENT_DATABASE_TYPE=dooers — "
+                "do not put a local JSON path in env.prod; Cloud Run uses the tenant service "
+                "account (ADC). Keep GOOGLE_APPLICATION_CREDENTIALS only in .env for local dev.",
+                file=sys.stderr,
+            )
+        if s.app_postgres_pool_enabled:
+            print(
+                "  ! APP_POSTGRES_POOL_ENABLED=true with AGENT_DATABASE_TYPE=dooers — "
+                "the app RAG pool uses a password DSN and cannot share the IAM AlloyDB "
+                "connector. Set APP_POSTGRES_POOL_ENABLED=false in env.prod (chat/threads "
+                "via SDK still work; SQL-backed RAG metadata is skipped until managed-db "
+                "pool support lands).",
+                file=sys.stderr,
+            )
+    elif not s.agent_database_name:
         errors.append("AGENT_DATABASE_NAME is not configured")
     if errors:
         print("Configuration problems detected:", file=sys.stderr)
@@ -188,8 +239,17 @@ def _validate(s: Settings) -> None:
 
 
 settings = Settings()
-if settings.google_application_credentials.strip():
-    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = settings.google_application_credentials.strip()
+_gac = settings.google_application_credentials.strip()
+if _gac:
+    # On hosted deploy with managed DB, a dev-only JSON path breaks ADC (file not in container).
+    if (settings.agent_database_type or "").strip().lower() == "dooers":
+        print(
+            "Ignoring GOOGLE_APPLICATION_CREDENTIALS for AGENT_DATABASE_TYPE=dooers — "
+            "use ADC on Cloud Run; keep the JSON path only in .env for local dev.",
+            file=sys.stderr,
+        )
+    else:
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _gac
 _validate(settings)
 
 # OpenAI Agents SDK trace export reads os.environ["OPENAI_API_KEY"] (not Pydantic's settings alone).

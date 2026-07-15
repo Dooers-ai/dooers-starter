@@ -46,4 +46,8 @@ agent_config = AgentConfig(
     azure_storage_connection_string=settings.azure_storage_connection_string,
     azure_storage_container=settings.azure_storage_container,
     dooers_whatsapp_service=True,
+    # Optional otel/core overrides; empty → SDK platform defaults.
+    agent_core_base_url=settings.agent_core_base_url.strip(),
+    otel_service_url=settings.agent_otel_service_url.strip(),
+    otel_service_name=settings.otel_service_name.strip(),
 )

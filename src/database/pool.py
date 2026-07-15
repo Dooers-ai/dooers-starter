@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from urllib.parse import quote_plus
 
 import asyncpg
 
@@ -15,14 +16,27 @@ _pool: asyncpg.Pool | None = None
 
 
 def _dsn() -> str:
+    user = quote_plus(settings.agent_database_user)
+    password = quote_plus(settings.agent_database_password)
     return (
-        f"postgresql://{settings.agent_database_user}:{settings.agent_database_password}"
+        f"postgresql://{user}:{password}"
         f"@{settings.agent_database_host}:{settings.agent_database_port}/{settings.agent_database_name}"
     )
 
 
-async def init_pool() -> asyncpg.Pool:
+async def init_pool() -> asyncpg.Pool | None:
     global _pool
+    if not settings.app_postgres_pool_enabled:
+        logger.info("APP_POSTGRES_POOL_ENABLED=false — skipping app RAG Postgres pool")
+        return None
+    db_type = (settings.agent_database_type or "").strip().lower()
+    if db_type == "dooers":
+        logger.warning(
+            "AGENT_DATABASE_TYPE=dooers — app RAG Postgres pool skipped "
+            "(password DSN incompatible with IAM AlloyDB; set APP_POSTGRES_POOL_ENABLED=false "
+            "in env.prod to silence this warning)"
+        )
+        return None
     if _pool is not None:
         return _pool
     ssl = settings.agent_database_ssl

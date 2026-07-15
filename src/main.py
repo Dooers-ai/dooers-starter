@@ -70,18 +70,22 @@ async def lifespan(app: FastAPI):
             "agent_server.ensure_initialized() failed — continuing in DEGRADED mode "
             "(chat/persistence unavailable until AGENT_DATABASE_* points to a reachable Postgres)"
         )
-    try:
-        await init_pool()
-    except Exception:
-        logger.exception(
-            "Database init failed — continuing in DEGRADED mode "
-            "(RAG/threads unavailable until AGENT_DATABASE_* points to a reachable Postgres)"
-        )
+    if settings.app_postgres_pool_enabled:
+        try:
+            await init_pool()
+        except Exception:
+            logger.exception(
+                "App RAG Postgres pool init failed — continuing in DEGRADED mode "
+                "(settings-upload SQL metadata unavailable until AGENT_DATABASE_* is reachable)"
+            )
+    else:
+        logger.info("App Postgres pool disabled (APP_POSTGRES_POOL_ENABLED=false)")
     yield
-    try:
-        await close_pool()
-    except Exception:
-        logger.exception("close_pool() failed during shutdown")
+    if settings.app_postgres_pool_enabled:
+        try:
+            await close_pool()
+        except Exception:
+            logger.exception("close_pool() failed during shutdown")
     try:
         await agent_server.close()
     except Exception:
@@ -224,8 +228,8 @@ async def root_bare():
     return {
         "service": "Dooers Agent Starter",
         "version": "0.1.0",
-        "api_prefix": API_PREFIX,
-        "hint": f"Use routes under {API_PREFIX}/",
+        "api_prefix": API_PREFIX or "/",
+        "hint": f"Routes are served under {API_PREFIX or '/'} (WebSocket at {API_PREFIX}/ws).",
     }
 
 

@@ -3,10 +3,14 @@ agent_id: bae9ac1d-0f42-4916-b218-9e2c09a047cb
 organization_id: e7d3594c-f61f-49c7-a4a0-ca288dd0619e
 name: starter-deploy-test
 description: Starter agent built with dooers-starter.
+# Caminho do endpoint de mensagens (WebSocket). Mantenha "/" — o agente serve na raiz
+# e o load balancer da Dooers roteia https://agents.dooers.ai/<agent-id>/… removendo o
+# prefixo /<agent-id> antes de encaminhar. Requer USE_API_PREFIX=false no runtime.
 message_path: /
 message_scheme: wss
 # "postgres" (padrão): você fornece o banco via AGENT_DATABASE_* no env.prod.
-# "dooers": banco gerenciado pela Dooers (provisionado no push; ver README).
+# "dooers": banco gerenciado pela Dooers (provisionado no push; env.prod:
+#   AGENT_DATABASE_TYPE=dooers + APP_POSTGRES_POOL_ENABLED=false — ver README).
 database:
   type: postgres
 whatsapp:

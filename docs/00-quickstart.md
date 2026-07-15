@@ -42,12 +42,15 @@ O SDK cria as tabelas de threads/eventos no startup. As migrações em `migratio
 uv run poe dev
 ```
 
-Rotas (com prefixo padrão):
+Rotas na raiz (padrão `USE_API_PREFIX=false`):
 
-- WebSocket: `ws://localhost:8005/api/dev/dooers-starter/ws`
+- WebSocket: `ws://localhost:8005/ws`
 - Health: `http://localhost:8005/health`
-- Uploads: `POST /api/dev/dooers-starter/uploads`
-- Settings upload: `POST /api/dev/dooers-starter/settings-upload`
+- Uploads: `POST http://localhost:8005/uploads`
+- Settings upload: `POST http://localhost:8005/settings-upload`
+
+Hospedado, o agente é acessível em `https://agents.dooers.ai/<agent-id>/…` (o load balancer remove o
+prefixo `/<agent-id>` antes de encaminhar, então as rotas continuam na raiz).
 
 ## 5. Conectar ao Studio
 

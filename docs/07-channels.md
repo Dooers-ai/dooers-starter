@@ -21,7 +21,8 @@ Um agente Dooers pode ser alcançado de **três formas**. O **mesmo handler** (`
 
 **Quem usa:** membros do time no dashboard (operadores, viewers).
 
-**Endpoint do agente:** `wss://{host}{api_prefix}/ws`
+**Endpoint do agente:** `/ws` na raiz. Hospedado: `wss://agents.dooers.ai/<agent-id>/ws` (o LB remove o
+prefixo `/<agent-id>`, então o agente serve em `/ws`).
 
 **Como funciona:**
 
@@ -69,8 +70,8 @@ Cada evento do handler é **persistido na thread** (como no WebSocket). A UI Doo
 
 | Rota | Canal | Quem chama |
 |------|-------|------------|
-| `{api_prefix}/ws` | `dooers-platform` (default) | UI Dooers |
-| `{api_prefix}/whatsapp/inbound` | `whatsapp` | Serviço Dooers WhatsApp Tools (HMAC) |
+| `/ws` | `dooers-platform` (default) | UI Dooers |
+| `/whatsapp/inbound` | `whatsapp` | Serviço Dooers WhatsApp Tools (HMAC) |
 | *sua rota* ex. `/hooks/crm` | `api`, `crm`, … | Seu backend — você implementa e chama `dispatch()` |
 
 ### WhatsApp (canal externo gerido pela Dooers)
