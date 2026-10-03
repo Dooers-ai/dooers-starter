@@ -1,95 +1,79 @@
-"""Agent settings validation: LLM provider/model and API keys.
+"""Which LLM serves this turn, and the user-facing message when it cannot.
 
-Chat execution uses the OpenAI Agents SDK in ``src.modules.agent.capabilities``.
-Áudio STT/TTS: sempre API OpenAI (`openai_api_key`).
+Order of precedence for the chat model:
+
+1. ``llm_model`` set for this turn by the Studio chat picker (``apply_chat_llm_override``);
+2. ``llm_models`` — the creator's default in Studio (options come from the gateway allow-list);
+3. ``DEFAULT_LLM_MODEL`` when the key allows it, else the first allow-listed model.
+
+Provider: the Dooers Gateway whenever ``DOOERS_GATEWAY_API_KEY`` is set; a BYO ``OPENAI_API_KEY``
+otherwise. Audio (STT/TTS) is always vendor-direct OpenAI because the gateway serves text models.
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal
+
+from src.config import settings
+
+ProviderKey = Literal["dooers_gateway", "openai"]
 
 
 class UserVisibleAgentError(ValueError):
-    """Erro com mensagem pensada para o utilizador final (configuração, etc.)."""
+    """An error whose message is safe and useful to show to the end user."""
 
 
-def _strip(s: Any) -> str:
-    return (str(s) if s is not None else "").strip()
-
-
-USER_MESSAGE_MISSING_LLM_API_KEY = (
-    "As chaves de API do fornecedor de LLM não foram configuradas. "
-    "Peça ao criador do agente ou a um administrador da sua organização para configurar as chaves de API nas definições do agente."
+USER_MESSAGE_MISSING_LLM = (
+    "Nenhum modelo de linguagem está configurado para este agente. "
+    "Defina DOOERS_GATEWAY_API_KEY no ambiente (ou OPENAI_API_KEY como alternativa)."
 )
-
-USER_MESSAGE_MISSING_AZURE_ENDPOINT = (
-    "Para Azure, o endpoint não foi configurado. "
-    "Peça ao criador do agente ou a um administrador da sua organização para configurar o endpoint nas definições do agente."
+USER_MESSAGE_MISSING_AUDIO = (
+    "Áudio (transcrição e voz) requer OPENAI_API_KEY no ambiente do agente. "
+    "Envie a mensagem em texto ou peça ao criador do agente para configurar a chave."
 )
-
-USER_MESSAGE_MISSING_OPENAI_AUDIO_KEY = (
-    "A chave API OpenAI para áudio (STT/TTS) não foi configurada. "
-    "Peça ao criador do agente ou a um administrador da sua organização para configurar a chave API OpenAI nas definições do agente."
-)
-
-USER_MESSAGE_UNKNOWN_LLM_PROVIDER = (
-    "O modelo LLM nas definições não é reconhecido ou não está na lista suportada. "
-    "Peça ao criador do agente ou a um administrador da sua organização para escolher um modelo multimodal na lista «Modelo LLM — chat»."
-)
+USER_MESSAGE_MODEL_NOT_ALLOWED = "O modelo selecionado não está disponível para a chave de API deste agente. Escolha outro modelo na lista."
 
 
-def normalize_llm_provider(agent_settings: dict[str, Any]) -> str:
-    """Deriva o fornecedor do valor `fornecedor:modelo` em `llm_model`, ou do legado `llm_provider`."""
-    raw_model = _strip(agent_settings.get("llm_model"))
-    if ":" in raw_model:
-        p = raw_model.split(":", 1)[0].strip().lower()
-        if p in ("openai", "azure_openai", "gemini", "claude"):
-            return p
-    raw = agent_settings.get("llm_provider")
-    p = _strip(raw if raw is not None else "openai").lower()
-    return p if p else "openai"
+def _strip(value: Any) -> str:
+    return (str(value) if value is not None else "").strip()
 
 
-def _resolve_chat_provider_and_model(agent_settings: dict[str, Any]) -> tuple[str, str]:
-    raw = _strip(agent_settings.get("model_processing") or agent_settings.get("llm_model"))
-    if ":" in raw:
-        provider, model = raw.split(":", 1)
-        provider = provider.strip().lower()
-        model = model.strip()
-        if provider in ("openai", "azure_openai", "gemini", "claude") and model:
-            return provider, model
-        raise UserVisibleAgentError(USER_MESSAGE_UNKNOWN_LLM_PROVIDER)
-    provider = normalize_llm_provider(agent_settings)
-    model = raw or "gpt-4o-mini"
-    return provider, model
+def normalize_llm_provider(agent_settings: dict[str, Any] | None = None) -> ProviderKey:
+    _ = agent_settings
+    return "dooers_gateway" if settings.uses_dooers_gateway else "openai"
 
 
-def provider_api_key(agent_settings: dict[str, Any]) -> str:
-    return _strip(agent_settings.get("provider_api_key"))
+def resolve_chat_model(agent_settings: dict[str, Any], *, allowed: tuple[str, ...] | None = None) -> str:
+    """Model id for this turn. ``allowed`` (gateway allow-list) wins over any configured value."""
+    requested = _strip(agent_settings.get("llm_model")) or _strip(agent_settings.get("llm_models"))
+    # Legacy ``provider:model`` values from older starters: keep the model part.
+    if ":" in requested:
+        requested = requested.split(":", 1)[1].strip()
+    if allowed:
+        if requested and requested in allowed:
+            return requested
+        if settings.default_llm_model in allowed:
+            return settings.default_llm_model
+        return allowed[0]
+    return requested or settings.default_llm_model
 
 
 def ensure_llm_provider_config(agent_settings: dict[str, Any]) -> None:
-    """Garante chave (e endpoint Azure se aplicável). Levanta UserVisibleAgentError se faltar algo."""
-    if not provider_api_key(agent_settings):
-        raise UserVisibleAgentError(USER_MESSAGE_MISSING_LLM_API_KEY)
-    prov, _model = _resolve_chat_provider_and_model(agent_settings)
-    if prov == "azure_openai":
-        if not _strip(agent_settings.get("provider_azure_openai_endpoint")):
-            raise UserVisibleAgentError(USER_MESSAGE_MISSING_AZURE_ENDPOINT)
+    if not settings.uses_dooers_gateway and not settings.openai_api_key.strip():
+        raise UserVisibleAgentError(USER_MESSAGE_MISSING_LLM)
 
 
-def openai_api_key_audio(agent_settings: dict[str, Any]) -> str:
-    """Chave dedicada à API OpenAI para STT/TTS (sempre OpenAI, independente do chat)."""
-    return _strip(agent_settings.get("openai_api_key"))
+def ensure_audio_config() -> None:
+    if not settings.openai_api_key.strip():
+        raise UserVisibleAgentError(USER_MESSAGE_MISSING_AUDIO)
 
 
-def ensure_openai_audio_config(agent_settings: dict[str, Any]) -> None:
-    """STT/TTS usam sempre a API OpenAI — chave obrigatória."""
-    if not openai_api_key_audio(agent_settings):
-        raise UserVisibleAgentError(USER_MESSAGE_MISSING_OPENAI_AUDIO_KEY)
-
-
-def openai_key_for_stt_tts(agent_settings: dict[str, Any]) -> str:
-    """Chave OpenAI só para áudio (`openai_api_key`)."""
-    ensure_openai_audio_config(agent_settings)
-    return openai_api_key_audio(agent_settings)
+def map_llm_api_error(exc: BaseException) -> UserVisibleAgentError | None:
+    """Translate gateway/vendor denials into a message the user can act on."""
+    status = getattr(exc, "status_code", None)
+    text = str(exc).lower()
+    if status in {401, 403} or "model_not_allowed" in text or "not allowed" in text:
+        return UserVisibleAgentError(USER_MESSAGE_MODEL_NOT_ALLOWED)
+    if status == 404 and "model" in text:
+        return UserVisibleAgentError(USER_MESSAGE_MODEL_NOT_ALLOWED)
+    return None

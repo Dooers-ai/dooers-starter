@@ -2,6 +2,7 @@
 description: Conventions for building Dooers AI agents with this starter kit
 globs:
   - "src/**/*.py"
+  - "skills/**/*.md"
   - "docs/**/*.md"
 alwaysApply: true
 ---
@@ -10,62 +11,56 @@ alwaysApply: true
 
 ## Architecture (mandatory)
 
-- **Handler** lives in `src/modules/agent/agent.py` — async generator with `yield send.*`
-- **Workflow** in `workflow.py` — OpenAI Agents SDK `Runner.run`, not raw LLM calls
-- **Capabilities** in `src/modules/agent/capabilities/` — one domain per file, register handoffs in `workflow.py`
-- **Settings UI** in `schemas.py` — use `SettingsField`, `SettingsFieldVisibility.CREATOR`
-- **HTTP routes** only in `main.py` — do not add business logic there
+- **Handler** in `src/modules/agent/agent.py` — async generator with `yield send.*`; normalizes audio/images/documents.
+- **Workflow** in `workflow.py` — `Runner.run_streamed` on one agent; streams `tool_call`/`tool_result`/`reasoning`; execution guard; guardrails.
+- **One agent** built in `core/agent.py`. No per-domain agents or handoffs.
+- **Tools**: `core/tool_catalog.py` (contract) + `core/tools.py` (implementation) + `ALL_TOOLS`.
+- **Skills**: `skills/*.md` (frontmatter `id/name/description/requires_tools`) or Studio upload. Procedures live here, not in code.
+- **Prompt**: `core/policies.py` is static (creator settings only). Volatile state → `core/context.py::RuntimeContext.state_message()`.
+- **Settings UI** in `schemas.py`; **env** in `config.py` (+ `.env.example`, `env.prod.example`).
+- **HTTP routes** only in `main.py` — no business logic there.
 
-## SDK contract
+## Platform contract
 
-- Package: `dooers-agents-server[dooers,observability]>=0.16.1` (`from dooers.agents.server import ...`)
-- Every turn: `yield send.run_start()` … `yield send.run_end()`
-- Persist threads via SDK — never write SQL for messages/events
-- UI extras: `send.chart(...)`, `send.reasoning(...)` — see `docs/09-charts.md`
-- OTel: installed via `[observability]`; no GCP exporter keys — see `docs/10-observability.md`
-- Read `docs/02-sdk-contract.md` before changing handler signatures
+- LLM via **Dooers Gateway** (`DOOERS_GATEWAY_API_KEY`, Chat Completions wire). No vendor chat keys in Studio.
+- Knowledge via **managed Dooers RAG** (`src/modules/rag/`). Tools using `dooers.tools.rag` must call `rebind_execution_context` first.
+- Attached documents via `src/modules/doc_processing/` + tool `get_thread_document_context`.
+- Persistence only through the SDK (`memory`, `settings`, `await agent_server.database()`).
+- Every turn: `send.run_start()` … `send.run_end()`; tolerated errors → `record_soft_failure`.
+- Package: `dooers-agents-server[dooers,observability]>=0.23`.
 
 ## Best practices (developer agents)
 
-- **Credentials:** if an integration needs account/auth/billing, ask whether the user already has an account; ask env vs settings schema vs chat form; explain auth formats the tool supports. Never hardcode keys. Recipe: `docs/recipes/external-service-credentials.md`
-- **Test before push:** `uv run poe check` (+ optional `poe dev` / ngrok against local Dooers) before suggesting `dooers push`
-- **Audiences:** prefer distinct workflows by `organization_role` / `workspace_role` and/or `channel` (e.g. analytics/config for owner|manager)
+- **Credentials:** ask whether the user has an account; env vs settings vs chat form; explain auth formats. Never hardcode keys. Recipe: `docs/recipes/external-service-credentials.md`
+- **Test before push:** `uv run poe check && uv run poe test` (+ optional `poe dev`) before suggesting `dooers push`
+- **Audiences:** branch by `organization_role` / `workspace_role` / `channel` inside tools or Skills
 
 ## Do NOT
 
-- Commit secrets (`.env`, API keys, service account JSON)
-- Reimplement WebSocket protocol or WhatsApp HMAC — use SDK helpers
-- Reference or import private Dooers codebases — use only this starter and public packages (`dooers-agents-server`, `dooers-agents-client`, `dooers-cli`)
-- Skip credential onboarding questions or push without lint/local checks
+- Commit secrets (`.env`, `env.prod`, service-account JSON)
+- Add agents/handoffs for business domains; put date/user/documents in `policies.py`
+- Reimplement WebSocket protocol, WhatsApp HMAC, thread storage or vector stores
+- Reference private Dooers codebases — only this starter and public packages
 
 ## When adding features
 
 | Feature | Files to touch |
 |---------|----------------|
-| New domain | `capabilities/<name>.py`, `workflow.py` |
-| Studio field | `schemas.py` |
-| RAG field | `schemas.py`, optional allowlist in capability |
-| Form | tool in capability + form builders in `agent.py` |
-| Chart | `yield send.chart(...)` (optionally role-gated) |
-| External channel | `dispatch()` or `channels/` |
+| Procedure / policy | `skills/<id>.md` |
+| Action / integration | `core/tool_catalog.py`, `core/tools.py`, `src/modules/external/<svc>/`, `schemas.py` for credentials |
+| Studio field | `schemas.py` (+ `tests/test_schema_and_llm.py` if code depends on it) |
+| Form | tool marker + `send.form()` in `agent.py` (`docs/recipes/feedback-form.md`) |
+| Chart | `yield send.chart(...)` |
+| External channel | `dispatch()` in `channels/` |
 
 ## Code style
 
-- Python 3.11+, ruff line-length 120
-- Match existing naming: `create_<capability>`, `dooers_agent_handler`
-- Run `uv run poe check` after edits
-
-## Deploy
-
-Read `docs/08-deploy.md` before suggesting deploy. The creator runs `dooers login` and `dooers push` — do not commit secrets or run push without their credentials. Finish `poe check` (and optional qualitative local test) first.
-
-Recipe: `docs/recipes/deploy-with-dooers-push.md`
+- Python 3.11+, ruff (line-length 140, rules E/F/I/UP/B/SIM); run `uv run poe check`
+- Tool functions: validate args, business errors as text, compact output, `ctx.context.record_tool_call(name)`
 
 ## Reference docs (read first)
 
-0. `skills.md` — full agent creation workflow (integrations, deploy, best practices)
-1. `docs/01-anatomy.md`
-2. `docs/03-capabilities.md`
-3. `docs/02-sdk-contract.md`
-4. `docs/08-deploy.md` — when deploy is requested
-5. `docs/09-charts.md` / `docs/10-observability.md` — when relevant
+0. `skills.md` — full workflow
+1. `docs/01-anatomy.md` · 2. `docs/03-capabilities.md` · 3. `docs/02-sdk-contract.md`
+4. `docs/04-rag.md` / `docs/05-uploads.md` — knowledge and attachments
+5. `docs/08-deploy.md` — when deploy is requested

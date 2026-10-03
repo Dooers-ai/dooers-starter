@@ -37,7 +37,7 @@ Each `yield send.chart(...)` is persisted as a thread event (`type: "chart"`) an
 
 ### Typical patterns
 
-1. **Tool → chart** — a capability tool returns tabular data; the handler (or cortex) yields `send.chart` instead of dumping a markdown table.
+1. **Tool → chart** — a tool returns tabular data; the handler yields `send.chart` instead of dumping a markdown table.
 2. **Analytics for owners** — when `incoming.context.user.organization_role` is `owner` or `manager`, expose BI tools that emit charts; members get text-only workflows.
 3. **Smoke test** — in this starter, send `/test-chart-all` (or `/test-chart-bar`, …) in chat. Implementation: `src/modules/helpers/chart_demo.py`.
 

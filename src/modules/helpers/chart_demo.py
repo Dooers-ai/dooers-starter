@@ -181,6 +181,4 @@ async def handle_chart_test(message: str, send: Any) -> AsyncIterator[Any]:
         "small",
         "small-grid",
     }:
-        yield send.text(
-            f"Unknown chart type: `{chart_name}`. Try `/test-chart-all` to see available commands."
-        )
+        yield send.text(f"Unknown chart type: `{chart_name}`. Try `/test-chart-all` to see available commands.")

@@ -105,14 +105,15 @@ ficam indisponíveis (o serviço sobe em modo degradado, mas não funciona de ve
 | Recurso | Onde configurar |
 |---------|-----------------|
 | PostgreSQL acessível pelo runtime | Provisione você (DB gerenciado) e aponte `AGENT_DATABASE_*` para ele — ou use `database.type: dooers` (ver README) |
-| `OPENAI_API_KEY` | `env.prod` (RAG + STT/TTS) |
+| `DOOERS_GATEWAY_API_KEY` | `env.prod` — LLM via Dooers Gateway |
+| `DOOERS_RAG_SERVICE_URL` + `AGENT_SEED_SECRET` | `env.prod` — base de conhecimento (RAG gerenciado), opcional |
+| `OPENAI_API_KEY` | `env.prod` — só para áudio (STT/TTS), opcional |
 | `AGENT_DATABASE_*` | `env.prod` — **somente** com `database.type: postgres` (host/port/user/password/name do seu Postgres acessível pelo Cloud Run, **não** `localhost`) |
 | `AGENT_DATABASE_TYPE=dooers` | `env.prod` — com `database.type: dooers` no yaml; **não** defina host/senha |
-| `APP_POSTGRES_POOL_ENABLED=false` | `env.prod` — **obrigatório** com banco gerenciado (`dooers`); desliga o pool SQL do starter (tabelas RAG) que usa DSN com senha |
 | `USE_API_PREFIX=false` | `env.prod` — obrigatório para deploys hospedados (rotas na raiz `/`) |
 | GCS/Azure (opcional) | `env.prod` — credenciais + flags `STORE_*` (não use `GOOGLE_APPLICATION_CREDENTIALS` com path local no `env.prod`) |
 
-Chaves LLM de chat (`provider_api_key`) vão no **Studio** (settings do blueprint), não no Dockerfile.
+O modelo é escolhido no **Studio** (lista sincronizada com a allow-list da chave do gateway); nenhuma chave de vendor LLM é necessária.
 
 ### `env.prod` com banco gerenciado (`database.type: dooers`)
 
@@ -120,26 +121,18 @@ Use o template `env.prod.example`. Mínimo:
 
 ```bash
 AGENT_DATABASE_TYPE=dooers
-APP_POSTGRES_POOL_ENABLED=false
 USE_API_PREFIX=false
-OPENAI_API_KEY=sk-...
-RAG_PIPELINE=openai
+DOOERS_GATEWAY_API_KEY=dk_live_...
+DOOERS_RAG_SERVICE_URL=https://rag.dooers.ai
+AGENT_SEED_SECRET=...
 ```
 
 **Não inclua** no `env.prod`: `AGENT_DATABASE_HOST`, `AGENT_DATABASE_USER`, `AGENT_DATABASE_PASSWORD`,
 `GOOGLE_APPLICATION_CREDENTIALS`. O Cloud Run usa ADC (service account do tenant); um path `./sandbox-….json`
 causa `DefaultCredentialsError` no container.
 
-O starter tem **dois** caminhos de Postgres:
-
-| Caminho | Quem usa | Com `dooers` |
-|---------|----------|--------------|
-| SDK (`agent_server.ensure_initialized`) | Threads, settings, eventos | AlloyDB via IAM — funciona |
-| App pool (`init_pool` / `APP_POSTGRES_POOL_ENABLED`) | Metadados SQL do RAG (`agent_rag_vector_store`) | Desligado — DSN com senha é incompatível com user IAM |
-
-Chat e persistência do SDK funcionam com `APP_POSTGRES_POOL_ENABLED=false`. Upload RAG via
-`/settings-upload` que depende das tabelas SQL do starter fica indisponível até suporte futuro ao pool
-em banco gerenciado — ou use Postgres próprio com `APP_POSTGRES_POOL_ENABLED=true`.
+Tudo o que o starter persiste (threads, settings, eventos, documentos processados) passa pelo SDK
+(`await agent_server.database()`), então funciona igual com Postgres próprio e com o banco gerenciado.
 
 ---
 
@@ -186,7 +179,7 @@ OPENAI_API_KEY=...
 ```bash
 uv sync --extra dev
 uv run poe dev
-curl http://localhost:8005/health
+curl http://localhost:8000/health
 ```
 
 ### 4. Instalar e autenticar o CLI
@@ -289,13 +282,12 @@ Gere `DOOERS_API_TOKEN` no painel da organização (Settings → API / CLI token
 | Build Docker falha | Dependência de sistema | Ajuste `Dockerfile` (ex.: `libpq-dev` para Postgres) |
 | Deploy falha: "container failed to start and listen on PORT 8080" | Dockerfile escuta porta fixa, ou crash no startup | `CMD` deve usar `--port ${PORT:-8080}`; veja linhas abaixo |
 | Deploy falha: `DefaultCredentialsError` / `GOOGLE_APPLICATION_CREDENTIALS` | Path de JSON local no `env.prod` | Remova `GOOGLE_APPLICATION_CREDENTIALS` do `env.prod`; Cloud Run usa ADC |
-| Deploy falha: `ValueError: '@localhost:5432'` em `init_pool` | `APP_POSTGRES_POOL_ENABLED=true` com user IAM (`tenant-…@dooers-agents.iam`) | Defina `APP_POSTGRES_POOL_ENABLED=false` no `env.prod` |
 | Deploy falha: connection refused em `localhost:5432` | `AGENT_DATABASE_HOST=localhost` no `env.prod` | Com banco gerenciado: remova `AGENT_DATABASE_HOST`; com Postgres próprio: use host acessível pelo Cloud Run |
-| Deploy "sobe" mas a URL dá 503 / crash-loop | Faltou `OPENAI_API_KEY` ou DB inacessível no `env.prod` | Preencha o `env.prod` e re-deploy |
+| Deploy "sobe" mas a URL dá 503 / crash-loop | DB inacessível ou `CONFIG_STRICT=true` com env incompleto | Preencha o `env.prod` e re-deploy; `/health` mostra `llm`/`rag` |
 | Health OK mas chat não conecta | Messages URL errada, ou rotas sob `api_prefix` | Confira `wss://agents.dooers.ai/<agent-id>/ws` e `USE_API_PREFIX=false` |
 | `/uploads`, `/ws` ou `/whatsapp/inbound` dão 404 | `USE_API_PREFIX=true` no deploy (rotas ficaram sob `/api/...`) | Defina `USE_API_PREFIX=false` no `env.prod` e re-deploy |
-| Agente sobe mas LLM não responde | Settings vazias | Configure LLM + API key no Studio |
-| RAG não indexa | `OPENAI_API_KEY` ausente no runtime, ou pool SQL desligado | Inclua `OPENAI_API_KEY` no `env.prod`; com `APP_POSTGRES_POOL_ENABLED=false`, metadados SQL do RAG ficam off |
+| Agente sobe mas LLM não responde | `DOOERS_GATEWAY_API_KEY` ausente/inválida ou modelo fora da allow-list | Corrija o `env.prod`; escolha um modelo listado no Studio |
+| RAG não indexa (`/settings-upload` 503) | `DOOERS_RAG_SERVICE_URL` ou `AGENT_SEED_SECRET` ausentes | Preencha ambos no `env.prod` |
 | WhatsApp não chega | HMAC / URL inbound | `whatsapp.enabled: true` no yaml; URL correta no provisionamento |
 
 ---
@@ -306,7 +298,7 @@ Gere `DOOERS_API_TOKEN` no painel da organização (Settings → API / CLI token
 
 - Editar `dooers.yaml` (nome, descrição, perfil, `database.type`)
 - Ajustar `Dockerfile` e `pyproject.toml`
-- Garantir `main.py` só chama `init_pool()` quando `APP_POSTGRES_POOL_ENABLED=true`
+- Correr `uv run poe test`
 - Correr `uv run poe check` e corrigir lint
 - Correr `dooers validate` e corrigir erros estruturais
 - Gerar `env.prod` a partir de `env.prod.example` (managed DB ou Postgres próprio)
@@ -316,7 +308,7 @@ Gere `DOOERS_API_TOKEN` no painel da organização (Settings → API / CLI token
 
 - Commitar `.env`, `env.prod`, service account JSON ou API keys
 - Colocar `GOOGLE_APPLICATION_CREDENTIALS` ou `AGENT_DATABASE_HOST=localhost` no `env.prod` de produção
-- Deixar `APP_POSTGRES_POOL_ENABLED=true` quando `AGENT_DATABASE_TYPE=dooers`
+- Pedir chaves de vendor LLM ao criador (o chat usa o Dooers Gateway)
 - Inventar flags do CLI — usar `dooers push --help`
 - Executar `dooers login` ou `dooers push` sem o criador autenticado (requer conta e token)
 - Documentar APIs ou serviços Dooers fora dos pacotes públicos
@@ -331,7 +323,7 @@ Quero fazer deploy deste agente na Dooers.
 Siga docs/08-deploy.md e docs/recipes/deploy-with-dooers-push.md:
 
 1. Revise dooers.yaml (nome, descrição, whatsapp.enabled, database.type).
-2. Se database.type=dooers: env.prod com AGENT_DATABASE_TYPE=dooers e APP_POSTGRES_POOL_ENABLED=false;
+2. Se database.type=dooers: env.prod com AGENT_DATABASE_TYPE=dooers;
    sem GOOGLE_APPLICATION_CREDENTIALS nem AGENT_DATABASE_HOST.
 3. Confirme que Dockerfile e pyproject.toml estão corretos.
 4. Rode uv run poe check e corrija erros.

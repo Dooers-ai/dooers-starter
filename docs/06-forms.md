@@ -38,11 +38,11 @@ async def handler(incoming, send, ...):
 
 ## Padrão tool → form
 
-1. Capability chama tool que retorna `{"requiresForm": true}`
-2. Handler inspeciona `new_runner_items` do workflow
-3. Se detectado, emite `send.form()` em vez de texto
+1. Uma tool retorna um marcador (ex.: `{"requiresForm": true, "formType": "feedback"}`)
+2. O handler inspeciona `outcome.tools_called` / o resultado e emite `send.form()` em vez de texto
+3. No turno seguinte, `incoming.form_data` chega ao handler — `form_data_to_text` em `agent.py` o transforma em texto para o modelo
 
-Exemplo completo: `src/modules/agent/agent.py` + `capabilities/feedback.py`.
+Ver [recipes/feedback-form.md](recipes/feedback-form.md).
 
 ## Ficheiros em formulários
 

@@ -21,7 +21,7 @@ O criador já tem:
 [ ] Dockerfile escuta em $PORT (--port ${PORT:-8080}), não numa porta fixa
 [ ] env.prod gerado a partir de env.prod.example (INJETADO no runtime; nunca commitar)
 [ ] env.prod — USE_API_PREFIX=false (rotas na raiz, casando com o strip de prefixo do LB)
-[ ] Se database.type=dooers: AGENT_DATABASE_TYPE=dooers, APP_POSTGRES_POOL_ENABLED=false,
+[ ] Se database.type=dooers: AGENT_DATABASE_TYPE=dooers,
     SEM GOOGLE_APPLICATION_CREDENTIALS, SEM AGENT_DATABASE_HOST/USER/PASSWORD
 [ ] Se database.type=postgres: AGENT_DATABASE_* apontando para Postgres acessível (não localhost)
 [ ] dooers-cli ≥ 0.8.0 (pip show dooers-cli)
@@ -53,9 +53,9 @@ A IA pode preparar o projeto; **login e push exigem credenciais do criador**.
 >
 > Variáveis que precisam estar no `env.prod` ANTES do push (injetadas no runtime):
 > - `USE_API_PREFIX=false`
-> - `OPENAI_API_KEY`
-> - **Postgres próprio:** `AGENT_DATABASE_*` (host acessível pelo Cloud Run, não `localhost`) + `APP_POSTGRES_POOL_ENABLED=true` se usar RAG SQL
-> - **Banco gerenciado (`database.type: dooers`):** `AGENT_DATABASE_TYPE=dooers`, `APP_POSTGRES_POOL_ENABLED=false` — sem host/senha/GOOGLE_APPLICATION_CREDENTIALS
+> - `DOOERS_GATEWAY_API_KEY` (+ `DOOERS_RAG_SERVICE_URL`/`AGENT_SEED_SECRET` para RAG; `OPENAI_API_KEY` só para áudio)
+> - **Postgres próprio:** `AGENT_DATABASE_*` (host acessível pelo Cloud Run, não `localhost`)
+> - **Banco gerenciado (`database.type: dooers`):** `AGENT_DATABASE_TYPE=dooers` — sem host/senha/GOOGLE_APPLICATION_CREDENTIALS
 
 ## Prompt para vibe coding
 
@@ -80,9 +80,7 @@ No final, imprima os 3 comandos que eu devo executar no terminal.
 | `dooers.yaml` inválido / faltam `agent_id`/`organization_id` | `protocol_version: "2"` + rodar `dooers agents create` |
 | `PushResponse.image Field required` no push | Atualizar `dooers-cli` para ≥ 0.8.0 |
 | Dockerfile missing | Usar o Dockerfile do starter |
-| Port mismatch | `CMD` deve escutar em `$PORT` (Cloud Run injeta 8080): `--port ${PORT:-8080}` — **não** fixar 8005 |
+| Port mismatch | `CMD` deve escutar em `$PORT` (Cloud Run injeta 8080): `--port ${PORT:-8080}` — **não** fixar 8000 |
 | Handler path | WebSocket em `/ws` via `main.py` (raiz; `USE_API_PREFIX=false`) |
 | `DefaultCredentialsError` no Cloud Run | Remover `GOOGLE_APPLICATION_CREDENTIALS` do `env.prod` |
-| `ValueError: '@localhost:5432'` em `init_pool` | `APP_POSTGRES_POOL_ENABLED=false` quando `AGENT_DATABASE_TYPE=dooers` |
 | `AGENT_DATABASE_HOST=localhost` no deploy | Remover (managed DB) ou trocar por host real (Postgres próprio) |
-| `main.py` sempre chama `init_pool()` | Guard com `settings.app_postgres_pool_enabled` (padrão do starter) |

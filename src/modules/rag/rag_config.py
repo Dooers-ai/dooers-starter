@@ -1,39 +1,31 @@
-"""Resolve RAG pipeline and Azure AI Search credentials: agent settings override env."""
+"""Managed Dooers RAG configuration."""
 
 from __future__ import annotations
 
-from typing import Any
+from pathlib import Path
+from typing import Literal
 
 from src.config import settings
 
 
-def _strip(s: Any) -> str:
-    return (str(s) if s is not None else "").strip()
+def managed_rag_configured() -> bool:
+    return settings.resolved_rag_pipeline == "dooers" and bool(settings.dooers_rag_service_url.strip())
 
 
-def resolve_rag_pipeline(agent_settings: dict[str, Any] | None) -> str:
-    if agent_settings:
-        p = _strip(agent_settings.get("rag_pipeline")).lower()
-        if p in {"openai", "azure_ai_search"}:
-            return p
-    return (settings.rag_pipeline or "openai").strip().lower()
+def require_managed_rag() -> str:
+    if not managed_rag_configured():
+        raise RuntimeError(
+            "Managed Dooers RAG is not configured (DOOERS_RAG_SERVICE_URL). "
+            "`dooers push` injects it when the organization has the RAG feature."
+        )
+    return settings.dooers_rag_service_url.strip().rstrip("/")
 
 
-def resolve_ai_search_endpoint(agent_settings: dict[str, Any] | None) -> str:
-    if agent_settings:
-        v = _strip(agent_settings.get("rag_azure_ai_search_endpoint"))
-        if v:
-            return v
-    return (settings.azure_ai_search_endpoint or "").strip()
-
-
-def resolve_ai_search_api_key(agent_settings: dict[str, Any] | None) -> str:
-    if agent_settings:
-        v = _strip(agent_settings.get("rag_azure_ai_search_api_key"))
-        if v:
-            return v
-    return (settings.azure_ai_search_api_key or "").strip()
-
-
-def azure_ai_search_configured(agent_settings: dict[str, Any] | None) -> bool:
-    return bool(resolve_ai_search_endpoint(agent_settings) and resolve_ai_search_api_key(agent_settings))
+def resolve_upload_strategy(filename: str) -> Literal["auto", "structured", "document"]:
+    """Spreadsheets become one entity per row; prose becomes chunks."""
+    ext = Path(filename or "").suffix.lower()
+    if ext in {".csv", ".xlsx", ".xls", ".json"}:
+        return "structured"
+    if ext in {".pdf", ".docx", ".txt", ".md", ".html"}:
+        return "document"
+    return "auto"

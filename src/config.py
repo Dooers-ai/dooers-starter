@@ -1,8 +1,26 @@
+"""Process-level configuration.
+
+Two kinds of settings live here:
+
+* **Bootstrap** values injected by Dooers Hosting or your local ``.env`` (port, database,
+  gateway key, RAG service URL, storage). They are process-wide and never editable from Studio.
+* **Defaults** for things the creator may later override per agent in Studio (model, prompt,
+  Skills, knowledge). Those live in ``agent_settings`` at request time — see ``schemas.py``.
+
+Everything the agent needs from the platform comes through four env vars that ``dooers run`` /
+``dooers push`` provide: ``DOOERS_GATEWAY_API_KEY`` (LLM), ``DOOERS_RAG_SERVICE_URL`` (knowledge),
+``AGENT_DATABASE_*`` (threads/settings) and ``AGENT_SEED_SECRET`` (service identity).
+"""
+
+from __future__ import annotations
+
 import os
 import sys
 
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_GATEWAY_BASE_URL = "https://llm.dooers.ai/v1"
 
 
 class Settings(BaseSettings):
@@ -13,149 +31,91 @@ class Settings(BaseSettings):
         env_ignore_empty=True,
     )
 
-    http_port: int = Field(
-        default=8000,
-        validation_alias=AliasChoices("HTTP_PORT", "PORT"),
-    )
-    #: Mount every agent route under ``/api/{env}/{name}``. Defaults to False so the
-    #: app serves at ``/`` — this is what a hosted deploy needs, because the Dooers
-    #: load balancer routes ``https://agents.dooers.ai/<agent-id>/…`` and STRIPS the
-    #: ``/<agent-id>`` prefix before forwarding, so the agent always sees ``/…`` (this
-    #: also matches ``message_path: /`` in ``dooers.yaml``). Only enable it for local
-    #: multi-agent routing behind a shared reverse proxy.
-    use_prefix: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("USE_API_PREFIX"),
-    )
+    # --- HTTP -----------------------------------------------------------------
+    http_port: int = Field(default=8000, validation_alias=AliasChoices("HTTP_PORT", "PORT"))
+    #: Mount routes under ``/api/{env}/{name}``. Keep False for Dooers Hosting (the load balancer
+    #: strips ``/<agent-id>`` and the agent must serve at ``/``, matching ``message_path: /``).
+    use_prefix: bool = Field(default=False, validation_alias=AliasChoices("USE_API_PREFIX"))
     api_environment: str = "dev"
-    api_agent_name: str = "dooers-starter"
-    #: Root log level for the process (DEBUG, INFO, WARNING, …). Azure SDK / httpx stay at WARNING — see ``src.main.configure_logging``.
+    api_agent_name: str = Field(default="dooers-starter", validation_alias=AliasChoices("API_AGENT_NAME"))
     logging_level: str = Field(default="INFO", validation_alias=AliasChoices("LOGGING_LEVEL"))
-    #: When True, configuration problems abort the process (``sys.exit(1)``) — useful locally to catch
-    #: misconfiguration early. When False (default) the process logs the problems and boots anyway so the
-    #: hosted deploy passes its readiness check; secret/DB-dependent features degrade until configured.
+    #: True → configuration problems abort boot (local/CI). False → log and boot degraded so the
+    #: hosted readiness check passes and the problem is visible in the thread instead of a crash loop.
     config_strict: bool = Field(default=False, validation_alias=AliasChoices("CONFIG_STRICT"))
+    service_url: str = Field(default="http://localhost:8000", validation_alias=AliasChoices("SERVICE_URL"))
+    assistant_name: str = Field(default="Assistant", validation_alias=AliasChoices("ASSISTANT_NAME"))
 
-    #: "postgres" (padrão — banco do criador via AGENT_DATABASE_*) ou "dooers"
-    #: (banco gerenciado pela Dooers — AlloyDB via IAM, sem senha; requer também
-    #: `database.type: dooers` no dooers.yaml). Ver README "Banco gerenciado".
-    agent_database_type: str = Field(
-        default="postgres",
-        validation_alias=AliasChoices("AGENT_DATABASE_TYPE"),
-    )
-    agent_database_host: str = Field(
-        default="localhost",
-        validation_alias=AliasChoices("AGENT_DATABASE_HOST"),
-    )
-    agent_database_port: int = Field(
-        default=5432,
-        validation_alias=AliasChoices("AGENT_DATABASE_PORT"),
-    )
-    agent_database_user: str = Field(
-        default="postgres",
-        validation_alias=AliasChoices("AGENT_DATABASE_USER"),
-    )
-    agent_database_name: str = Field(
-        default="dooers_agent",
-        validation_alias=AliasChoices("AGENT_DATABASE_NAME"),
-    )
-    agent_database_password: str = Field(
+    # --- Persistence (SDK) ------------------------------------------------------
+    #: "postgres" (your DB via AGENT_DATABASE_*) or "dooers" (managed AlloyDB, injected on push).
+    agent_database_type: str = Field(default="postgres", validation_alias=AliasChoices("AGENT_DATABASE_TYPE"))
+    agent_database_host: str = Field(default="localhost", validation_alias=AliasChoices("AGENT_DATABASE_HOST"))
+    agent_database_port: int = Field(default=5432, validation_alias=AliasChoices("AGENT_DATABASE_PORT"))
+    agent_database_user: str = Field(default="postgres", validation_alias=AliasChoices("AGENT_DATABASE_USER"))
+    agent_database_name: str = Field(default="dooers_agent", validation_alias=AliasChoices("AGENT_DATABASE_NAME"))
+    agent_database_password: str = Field(default="", validation_alias=AliasChoices("AGENT_DATABASE_PASSWORD"))
+    agent_database_ssl: bool | str = Field(default=False, validation_alias=AliasChoices("AGENT_DATABASE_SSL"))
+
+    # --- LLM: Dooers Gateway first ---------------------------------------------
+    #: ``dk_live_…`` key. The gateway exposes only the models allow-listed for this key.
+    dooers_gateway_api_key: str = Field(
         default="",
-        validation_alias=AliasChoices("AGENT_DATABASE_PASSWORD"),
+        validation_alias=AliasChoices("DOOERS_GATEWAY_API_KEY", "DOOERS_GATEWAY_KEY", "DOOERS_API_KEY", "DOOERS_LLM_TOKEN"),
     )
-    agent_database_ssl: bool | str = Field(
-        default=False,
-        validation_alias=AliasChoices("AGENT_DATABASE_SSL"),
+    dooers_gateway_base_url: str = Field(
+        default=DEFAULT_GATEWAY_BASE_URL,
+        validation_alias=AliasChoices("DOOERS_GATEWAY_BASE_URL", "DOOERS_GATEWAY_URL", "DOOERS_LLM_BASE_URL"),
     )
-    #: Optional asyncpg pool for app RAG tables (``agent_rag_vector_store``, etc.) — separate
-    #: from the SDK persistence store. Disable when using ``AGENT_DATABASE_TYPE=dooers`` (managed
-    #: AlloyDB via IAM) or when the agent does not need SQL-backed RAG metadata.
-    app_postgres_pool_enabled: bool = Field(
-        default=True,
-        validation_alias=AliasChoices("APP_POSTGRES_POOL_ENABLED"),
-    )
-
-    # Required for RAG (Vector Store + OpenAI file ingest). Not user-configurable.
+    #: Preferred chat model when the key allows it; otherwise the first allow-listed model.
+    # GLM-5 is the verified default for tool calling through the gateway's Chat Completions dialect.
+    # Gemini 3.x returns UPSTREAM_ERROR there when tools are present (as of 2026-10); switch once fixed.
+    default_llm_model: str = Field(default="glm-5-maas", validation_alias=AliasChoices("DEFAULT_LLM_MODEL"))
+    #: Optional BYO OpenAI key. Used for chat only when no gateway key is set, and always for
+    #: STT/TTS (the gateway serves text models; audio endpoints are vendor-direct).
     openai_api_key: str = Field(default="", validation_alias=AliasChoices("OPENAI_API_KEY"))
-    rag_pipeline: str = Field(
-        default="openai",
-        validation_alias=AliasChoices("RAG_PIPELINE"),
-    )
-    azure_ai_search_endpoint: str = Field(default="", validation_alias=AliasChoices("AZURE_AI_SEARCH_ENDPOINT"))
-    azure_ai_search_api_key: str = Field(default="", validation_alias=AliasChoices("AZURE_AI_SEARCH_API_KEY"))
-    azure_ai_search_index_prefix: str = Field(
-        default="dooers-kb",
-        validation_alias=AliasChoices("AZURE_AI_SEARCH_INDEX_PREFIX"),
-    )
-    #: After upload, GET the document once to prove it exists (helps debug stale portal UX).
-    azure_ai_search_verify_read_after_write: bool = Field(
-        default=False,
-        validation_alias=AliasChoices("AZURE_AI_SEARCH_VERIFY_READ_AFTER_WRITE"),
-    )
-    azure_storage_connection_string: str = Field(
-        default="",
-        validation_alias=AliasChoices("AZURE_STORAGE_CONNECTION_STRING"),
-    )
-    azure_storage_container: str = Field(default="", validation_alias=AliasChoices("AZURE_STORAGE_CONTAINER"))
-    #: When True, archive RAG upload originals to blob (``upload_archive_bytes``). Requires ``RAG_STORAGE_SERVICE`` = gcp|azure.
-    store_rag_uploads: bool = Field(default=False, validation_alias=AliasChoices("STORE_RAG_UPLOADS"))
-    rag_storage_service: str = Field(
-        default="none",
-        validation_alias=AliasChoices("RAG_STORAGE_SERVICE"),
-    )
 
-    gcp_bucket_name: str = Field(default="", validation_alias=AliasChoices("GCP_BUCKET_NAME"))
+    # --- Knowledge: managed Dooers RAG -----------------------------------------
+    #: Injected by ``dooers push`` when the organization has the RAG feature. Empty → no knowledge
+    #: base; the ``search_knowledge`` tool answers that none is configured.
+    dooers_rag_service_url: str = Field(default="", validation_alias=AliasChoices("DOOERS_RAG_SERVICE_URL"))
+    #: ``dooers`` | ``none``. Defaults to ``dooers`` when the service URL is present.
+    rag_pipeline: str = Field(default="", validation_alias=AliasChoices("RAG_PIPELINE"))
 
-    #: When True, chat attachments may be written to object storage when the creator enables ``persist_chat_attachments``.
-    #: Requires ``CHAT_STORAGE_SERVICE`` = gcp|azure and credentials.
+    # --- Storage for chat attachments -------------------------------------------
     store_chat_uploads: bool = Field(default=False, validation_alias=AliasChoices("STORE_CHAT_UPLOADS"))
-    #: Chat blob backend: ``none`` | ``gcp`` | ``azure`` (no ``auto`` — set explicitly).
+    #: ``none`` | ``gcp`` | ``dooers`` (managed bucket injected on push with ``storage.type: dooers``).
     chat_storage_service: str = Field(default="none", validation_alias=AliasChoices("CHAT_STORAGE_SERVICE"))
+    gcp_bucket_name: str = Field(default="", validation_alias=AliasChoices("GCP_BUCKET_NAME"))
+    google_application_credentials: str = Field(default="", validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS"))
 
-    # Path to service account JSON; exported to os.environ for google-cloud-* (ADC).
-    google_application_credentials: str = Field(
-        default="",
-        validation_alias=AliasChoices("GOOGLE_APPLICATION_CREDENTIALS"),
-    )
-
-    agent_analytics_url: str = Field(
-        default="https://api-v2.dev.dooers.ai/api/v2/webhooks/analytics",
-        validation_alias=AliasChoices("DOOERS_ANALYTICS_WEBHOOK_URL"),
-    )
-    service_url: str = Field(default="https://agent-dooers.ngrok.app", validation_alias=AliasChoices("SERVICE_URL"))
+    # --- Platform identity / observability --------------------------------------
     agent_seed_secret: str = Field(default="", validation_alias=AliasChoices("AGENT_SEED_SECRET"))
-    # Observability — optional overrides of SDK platform defaults (empty → api.dooers.ai / observability.dooers.ai).
-    agent_core_base_url: str = Field(
-        default="",
-        validation_alias=AliasChoices("AGENT_CORE_BASE_URL"),
-    )
-    agent_otel_service_url: str = Field(
-        default="",
-        validation_alias=AliasChoices("AGENT_OTEL_SERVICE_URL"),
-    )
-    otel_service_name: str = Field(
-        default="",
-        validation_alias=AliasChoices("OTEL_SERVICE_NAME"),
-    )
-    #: Overrides SDK default tools URL for ``dooers_whatsapp_service`` outbound.
-    #: Can include path prefix (e.g. https://services.dooers.ai/whatsapp).
+    agent_analytics_url: str = Field(default="", validation_alias=AliasChoices("DOOERS_ANALYTICS_WEBHOOK_URL"))
+    agent_core_base_url: str = Field(default="", validation_alias=AliasChoices("AGENT_CORE_BASE_URL"))
+    agent_otel_service_url: str = Field(default="", validation_alias=AliasChoices("AGENT_OTEL_SERVICE_URL"))
+    otel_service_name: str = Field(default="", validation_alias=AliasChoices("OTEL_SERVICE_NAME"))
+
+    # --- Channels ----------------------------------------------------------------
     tools_whatsapp_base_url: str = Field(
         default="https://services.dooers.ai/whatsapp",
-        validation_alias=AliasChoices(
-            "DOOERS_WHATSAPP_TOOLS_BASE", "TOOLS_WHATSAPP_BASE_URL", "tools_whatsapp_base_url"
-        ),
+        validation_alias=AliasChoices("DOOERS_WHATSAPP_TOOLS_BASE", "TOOLS_WHATSAPP_BASE_URL"),
     )
-    #: Passed to ``AgentConfig.allowed_content_types`` — SDK rejects other kinds before persisting the user message.
-    #: Default ``text,audio,image`` matches previous template behaviour (no chat documents).
-    #: Add ``document`` (e.g. ``text,audio,image,document``) to allow file parts. To disable the allowlist, set
-    #: ``allowed_content_types=None`` in ``agent_config.py``.
+    #: What to do with messages a human sent from the agent's own WhatsApp number to another chat:
+    #: ``register`` (store as assistant, no AI), ``dispatch`` (run the handler) or ``ignore``.
+    whatsapp_peer_message: str = Field(default="register", validation_alias=AliasChoices("WHATSAPP_PEER_MESSAGE"))
+
+    # --- Multimodal ----------------------------------------------------------------
+    #: Content kinds accepted on the chat. Documents (pdf, docx, xlsx, csv, txt, json) are extracted
+    #: into thread context; images go to the model as vision input; audio is transcribed.
     agent_allowed_content_types: str = Field(
-        default="text,audio,image",
+        default="text,audio,image,document",
         validation_alias=AliasChoices("AGENT_ALLOWED_CONTENT_TYPES", "ALLOWED_CONTENT_TYPES"),
     )
 
-    assistant_name: str = Field(default="Assistant", validation_alias=AliasChoices("ASSISTANT_NAME"))
+    # --- Skills -----------------------------------------------------------------------
+    #: Repository folder with built-in Skills (Markdown). Studio uploads add to these.
+    skills_dir: str = Field(default="skills", validation_alias=AliasChoices("SKILLS_DIR"))
 
+    # ------------------------------------------------------------------------------
     @property
     def api_prefix(self) -> str:
         if not self.use_prefix:
@@ -168,90 +128,69 @@ class Settings(BaseSettings):
     def public_base_url(self) -> str:
         return f"{self.service_url.rstrip('/')}{self.api_prefix}"
 
+    @property
+    def uses_dooers_gateway(self) -> bool:
+        return bool(self.dooers_gateway_api_key.strip())
 
-def _validate(s: Settings) -> None:
-    errors: list[str] = []
-    rag = (s.rag_pipeline or "").strip().lower()
-    if rag not in {"openai", "azure_ai_search"}:
-        errors.append("RAG_PIPELINE must be one of: openai, azure_ai_search")
-    if rag == "openai" and not s.openai_api_key:
-        errors.append("OPENAI_API_KEY is required when RAG_PIPELINE=openai")
-    # azure_ai_search: credentials may live in agent settings (Documentos RAG); env vars are optional fallback.
-    archive = (s.rag_storage_service or "none").strip().lower()
-    if archive not in {"none", "gcp", "azure"}:
-        errors.append("RAG_STORAGE_SERVICE must be one of: none, gcp, azure")
+    @property
+    def gateway_base_url(self) -> str:
+        raw = (self.dooers_gateway_base_url or DEFAULT_GATEWAY_BASE_URL).strip().rstrip("/")
+        return raw if raw.endswith("/v1") else f"{raw}/v1"
+
+    @property
+    def resolved_rag_pipeline(self) -> str:
+        explicit = (self.rag_pipeline or "").strip().lower()
+        if explicit in {"dooers", "none"}:
+            return explicit
+        return "dooers" if self.dooers_rag_service_url.strip() else "none"
+
+
+def _validate(s: Settings) -> list[str]:
+    problems: list[str] = []
+    if not s.uses_dooers_gateway and not s.openai_api_key.strip():
+        problems.append("No LLM credential: set DOOERS_GATEWAY_API_KEY (recommended) or OPENAI_API_KEY (fallback).")
+    if (s.rag_pipeline or "").strip().lower() not in {"", "dooers", "none"}:
+        problems.append("RAG_PIPELINE must be 'dooers' or 'none'.")
+    if s.resolved_rag_pipeline == "dooers" and not s.dooers_rag_service_url.strip():
+        problems.append("RAG_PIPELINE=dooers requires DOOERS_RAG_SERVICE_URL.")
     chat_ss = (s.chat_storage_service or "none").strip().lower()
-    if chat_ss not in {"none", "gcp", "azure"}:
-        errors.append("CHAT_STORAGE_SERVICE must be one of: none, gcp, azure")
-    gcp_configured = bool((s.gcp_bucket_name or "").strip())
-    azure_configured = bool((s.azure_storage_connection_string or "").strip() and (s.azure_storage_container or "").strip())
-    if s.store_rag_uploads and archive == "none":
-        errors.append("STORE_RAG_UPLOADS=true requires RAG_STORAGE_SERVICE to be gcp or azure")
-    if archive == "gcp" and not gcp_configured:
-        errors.append("RAG_STORAGE_SERVICE='gcp' requires GCP_BUCKET_NAME")
-    if archive == "azure" and not azure_configured:
-        errors.append(
-            "RAG_STORAGE_SERVICE='azure' requires AZURE_STORAGE_CONNECTION_STRING and AZURE_STORAGE_CONTAINER"
-        )
+    if chat_ss not in {"none", "gcp", "dooers"}:
+        problems.append("CHAT_STORAGE_SERVICE must be one of: none, gcp, dooers.")
+    if chat_ss == "gcp" and not s.gcp_bucket_name.strip():
+        problems.append("CHAT_STORAGE_SERVICE=gcp requires GCP_BUCKET_NAME.")
+    if (s.whatsapp_peer_message or "").strip().lower() not in {"ignore", "register", "dispatch"}:
+        problems.append("WHATSAPP_PEER_MESSAGE must be one of: ignore, register, dispatch.")
     db_type = (s.agent_database_type or "").strip().lower()
     if db_type == "dooers":
         if s.agent_database_host.strip().lower() in {"localhost", "127.0.0.1"}:
             print(
-                "  ! AGENT_DATABASE_HOST=localhost with AGENT_DATABASE_TYPE=dooers — "
-                "remove host/port/user/password from env.prod; the platform injects AlloyDB "
-                "connection fields on deploy.",
-                file=sys.stderr,
-            )
-        if s.google_application_credentials.strip():
-            print(
-                "  ! GOOGLE_APPLICATION_CREDENTIALS is set with AGENT_DATABASE_TYPE=dooers — "
-                "do not put a local JSON path in env.prod; Cloud Run uses the tenant service "
-                "account (ADC). Keep GOOGLE_APPLICATION_CREDENTIALS only in .env for local dev.",
-                file=sys.stderr,
-            )
-        if s.app_postgres_pool_enabled:
-            print(
-                "  ! APP_POSTGRES_POOL_ENABLED=true with AGENT_DATABASE_TYPE=dooers — "
-                "the app RAG pool uses a password DSN and cannot share the IAM AlloyDB "
-                "connector. Set APP_POSTGRES_POOL_ENABLED=false in env.prod (chat/threads "
-                "via SDK still work; SQL-backed RAG metadata is skipped until managed-db "
-                "pool support lands).",
+                "  ! AGENT_DATABASE_HOST=localhost with AGENT_DATABASE_TYPE=dooers — remove AGENT_DATABASE_* "
+                "from env.prod; the platform injects the managed connection on deploy.",
                 file=sys.stderr,
             )
     elif not s.agent_database_name:
-        errors.append("AGENT_DATABASE_NAME is not configured")
-    if errors:
-        print("Configuration problems detected:", file=sys.stderr)
-        for e in errors:
-            print(f"  - {e}", file=sys.stderr)
-        if s.config_strict:
-            # Fail fast (local dev / CI) so misconfiguration is caught before runtime.
-            sys.exit(1)
-        # Hosted deploy: the container must still boot and pass its readiness check.
-        # Missing secrets/DB degrade RAG/chat at request time rather than crash-looping
-        # the whole service. Provide the values via .env (uploaded by `dooers push`)
-        # or set CONFIG_STRICT=true to make these fatal.
-        print(
-            "  -> CONFIG_STRICT is false; continuing in degraded mode "
-            "(set the values in .env or CONFIG_STRICT=true to make these fatal).",
-            file=sys.stderr,
-        )
+        problems.append("AGENT_DATABASE_NAME is not configured.")
+    return problems
 
 
 settings = Settings()
-_gac = settings.google_application_credentials.strip()
-if _gac:
-    # On hosted deploy with managed DB, a dev-only JSON path breaks ADC (file not in container).
-    if (settings.agent_database_type or "").strip().lower() == "dooers":
-        print(
-            "Ignoring GOOGLE_APPLICATION_CREDENTIALS for AGENT_DATABASE_TYPE=dooers — "
-            "use ADC on Cloud Run; keep the JSON path only in .env for local dev.",
-            file=sys.stderr,
-        )
-    else:
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _gac
-_validate(settings)
 
-# OpenAI Agents SDK trace export reads os.environ["OPENAI_API_KEY"] (not Pydantic's settings alone).
+_gac = settings.google_application_credentials.strip()
+if _gac and (settings.agent_database_type or "").strip().lower() != "dooers":
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = _gac
+
+# ``dooers.tools.rag`` reads the service URL from the process environment.
+if settings.dooers_rag_service_url.strip():
+    os.environ.setdefault("DOOERS_RAG_SERVICE_URL", settings.dooers_rag_service_url.strip())
+# The Agents SDK trace exporter (optional) reads OPENAI_API_KEY from the environment.
 if settings.openai_api_key.strip():
     os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key.strip())
+
+_problems = _validate(settings)
+if _problems:
+    print("Configuration problems detected:", file=sys.stderr)
+    for problem in _problems:
+        print(f"  - {problem}", file=sys.stderr)
+    if settings.config_strict:
+        sys.exit(1)
+    print("  -> CONFIG_STRICT is false; booting in degraded mode.", file=sys.stderr)

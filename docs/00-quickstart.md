@@ -44,10 +44,10 @@ uv run poe dev
 
 Rotas na raiz (padrão `USE_API_PREFIX=false`):
 
-- WebSocket: `ws://localhost:8005/ws`
-- Health: `http://localhost:8005/health`
-- Uploads: `POST http://localhost:8005/uploads`
-- Settings upload: `POST http://localhost:8005/settings-upload`
+- WebSocket: `ws://localhost:8000/ws`
+- Health: `http://localhost:8000/health`
+- Uploads: `POST http://localhost:8000/uploads`
+- Settings upload: `POST http://localhost:8000/settings-upload`
 
 Hospedado, o agente é acessível em `https://agents.dooers.ai/<agent-id>/…` (o load balancer remove o
 prefixo `/<agent-id>` antes de encaminhar, então as rotas continuam na raiz).
@@ -65,7 +65,7 @@ prefixo `/<agent-id>` antes de encaminhar, então as rotas continuam na raiz).
 Use o pacote `dooers-agents-client` numa página React, ou teste o health:
 
 ```bash
-curl http://localhost:8005/health
+curl http://localhost:8000/health
 ```
 
 Para dispatch programático, veja [07-channels.md](07-channels.md).

@@ -1,34 +1,31 @@
-"""
-AgentServer (Dooers SDK), audio cache, and WebSocket handler.
+"""AgentServer instance and the WebSocket/WhatsApp handler.
 
-See docs/01-anatomy.md for the full flow and extension points.
+Flow per turn: ``run_start`` → validate config → normalize inputs (audio→text, documents→processed,
+images kept for vision) → stream the workflow (reasoning/tool events) → final text (+ optional
+voice) → ``run_end``. See docs/01-anatomy.md.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import os
-from collections.abc import Iterable
 from typing import Any
 
-from dooers.agents.server import AgentSend, AgentServer, ImagePart
-from openai import AsyncOpenAI
+from dooers.agents.server import AgentSend, AgentServer, ImagePart, apply_chat_llm_override
 
 from src.config import settings as app_settings
 from src.modules.agent.agent_config import agent_config
-from src.modules.agent.workflow import run_workflow
+from src.modules.agent.schemas import settings_schema
+from src.modules.agent.workflow import WorkflowOutcome, run_workflow
+from src.modules.doc_processing.prompt_context import summarize_document_for_note
+from src.modules.doc_processing.service import process_document_part
 from src.modules.helpers.chart_demo import handle_chart_test, is_chart_test_command
-from src.modules.helpers.speech import generate_speech, stt_model
-from src.modules.helpers.wire_content import incoming_parts_to_wire_content_dicts
 from src.modules.helpers.error_messages import GENERIC_USER_ERROR_MESSAGE
-from src.modules.external.openai import get_openai_audio_client
-from src.modules.llm.factory import (
-    UserVisibleAgentError,
-    ensure_llm_provider_config,
-    ensure_openai_audio_config,
-    normalize_llm_provider,
-)
+from src.modules.helpers.speech import generate_speech, transcribe
+from src.modules.helpers.wire_content import incoming_parts_to_wire_content_dicts
+from src.modules.llm.factory import UserVisibleAgentError, ensure_llm_provider_config
+from src.modules.llm.gateway_models import maybe_refresh_schema_llm_models_background
+from src.modules.observability.soft_failures import record_soft_failure
 
 logger = logging.getLogger("dooers-starter.agent")
 
@@ -38,107 +35,26 @@ if app_settings.tools_whatsapp_base_url:
 agent_server = AgentServer(agent_config)
 
 
-def _api_provider_wire(agent_settings: dict) -> str:
-    p = normalize_llm_provider(agent_settings)
-    if p in ("openai", "azure_openai"):
-        return "openai_responses"
-    if p == "gemini":
-        return "gemini"
-    if p == "claude":
-        return "claude"
-    return "openai_responses"
-
-
-def _parse_jsonish(value: Any) -> Any:
-    if not isinstance(value, str):
-        return value
-    text = value.strip()
-    if not text:
+def form_data_to_text(form_data: dict[str, Any] | None) -> str:
+    """Generic form submission → one line the model can read. Override for custom forms."""
+    if not isinstance(form_data, dict) or not form_data:
         return ""
-    try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        return value
+    pairs = [f"{k}: {v}" for k, v in form_data.items() if str(v or "").strip()]
+    return "Formulário enviado — " + "; ".join(pairs) if pairs else ""
 
 
-def _tool_outputs_by_name(items: Iterable[dict[str, Any]]) -> list[tuple[str, Any]]:
-    pending: dict[str, str] = {}
-    outputs: list[tuple[str, Any]] = []
-    for raw in items:
-        item_type = raw.get("type")
-        if item_type == "function_call":
-            call_id = str(raw.get("call_id") or raw.get("id") or "")
-            name = str(raw.get("name") or "tool")
-            if call_id:
-                pending[call_id] = name
-        elif item_type == "function_call_output":
-            call_id = str(raw.get("call_id") or "")
-            name = pending.pop(call_id, "tool")
-            outputs.append((name, _parse_jsonish(raw.get("output"))))
-    return outputs
-
-
-def _feedback_form_requested(items: Iterable[dict[str, Any]]) -> bool:
-    for name, output in _tool_outputs_by_name(items):
-        if name == "request_feedback_form" and isinstance(output, dict) and output.get("requiresForm") is True:
-            return True
-    return False
-
-
-def _feedback_form(send: AgentSend):
-    return send.form(
-        "Como foi sua experiência?",
-        [
-            send.form_select(
-                "rating",
-                label="Nota",
-                order=1,
-                required=True,
-                options=[
-                    {"value": "5", "label": "Excelente"},
-                    {"value": "4", "label": "Boa"},
-                    {"value": "3", "label": "Regular"},
-                    {"value": "2", "label": "Ruim"},
-                    {"value": "1", "label": "Péssima"},
-                ],
-            ),
-            send.form_text(
-                "comment",
-                label="Comentário (opcional)",
-                order=2,
-                required=False,
-                placeholder="Conte-nos o que podemos melhorar",
-            ),
-        ],
-        submit_label="Enviar feedback",
-        cancel_label="Cancelar",
-        size="medium",
-    )
-
-
-def _message_from_feedback_form(incoming: Any) -> str:
-    form_data = getattr(incoming, "form_data", None)
-    if not isinstance(form_data, dict):
-        return ""
-    rating = str(form_data.get("rating") or "").strip()
-    comment = str(form_data.get("comment") or "").strip()
-    if not rating:
-        return ""
-    parts = [f"Feedback recebido — nota: {rating}/5."]
-    if comment:
-        parts.append(f"Comentário: {comment}")
-    return " ".join(parts)
-
-
-async def dooers_agent_handler(incoming, send, memory, analytics, settings):
-    """Main handler: normalize content, run workflow, emit UI events."""
+async def dooers_agent_handler(incoming, send: AgentSend, memory, analytics, settings):
     agent_id = incoming.context.agent_id or ""
-    agent_settings = await settings.get_all()
-    agent_display_name = agent_settings.get("agent_name") or app_settings.assistant_name or "AI Agent"
+    agent_settings = apply_chat_llm_override(
+        await settings.get_all(),
+        chat_context=getattr(incoming.context, "chat_context", None),
+        schema=getattr(settings, "schema", None),
+    )
+    author = str(agent_settings.get("agent_name") or app_settings.assistant_name or "AI Agent")
 
     yield send.run_start(agent_id=agent_id)
+    await maybe_refresh_schema_llm_models_background(settings_schema)
 
-    # Local/Studio smoke test for send.chart (see docs/09-charts.md).
     if is_chart_test_command(incoming.message or ""):
         async for event in handle_chart_test(incoming.message or "", send):
             yield event
@@ -146,139 +62,128 @@ async def dooers_agent_handler(incoming, send, memory, analytics, settings):
         return
 
     if incoming.form_cancelled:
-        yield send.text("Feedback cancelado. Posso ajudar com mais alguma coisa?", author=agent_display_name)
+        yield send.text("Formulário cancelado. Posso ajudar com mais alguma coisa?", author=author)
         yield send.run_end()
         return
-
-    form_message = _message_from_feedback_form(incoming)
-    if form_message:
-        incoming.message = form_message
+    form_text = form_data_to_text(incoming.form_data)
+    if form_text:
+        incoming.message = form_text
 
     try:
         ensure_llm_provider_config(agent_settings)
-        ensure_openai_audio_config(agent_settings)
-    except UserVisibleAgentError as e:
-        yield send.text(str(e), author=agent_display_name)
+    except UserVisibleAgentError as exc:
+        yield send.text(str(exc), author=author)
         yield send.run_end(status="failed", error="configuration")
         return
-    except Exception:
-        logger.exception("LLM/openai settings validation failed")
-        yield send.text(GENERIC_USER_ERROR_MESSAGE, author=agent_display_name)
-        yield send.run_end(status="failed", error="configuration_error")
-        return
 
-    content_parts = incoming.content or []
-    oai: AsyncOpenAI = get_openai_audio_client(agent_settings)
-
+    # --- normalize multimodal input -------------------------------------------------------
     transcripts: list[str] = []
-    image_parts: list[tuple[bytes, str | None, str | None, str | None]] = []
-    doc_notes: list[str] = []
-    for part in content_parts:
-        if not hasattr(part, "type"):
-            continue
-        if part.type == "audio":
-            model = stt_model(agent_settings)
+    notes: list[str] = []
+    images: list[ImagePart] = []
+    for part in incoming.content or []:
+        kind = getattr(part, "type", None)
+        if kind == "audio":
             try:
-                tr = await oai.audio.transcriptions.create(
-                    model=model,
-                    file=(part.filename or "audio.webm", part.data, part.mime_type),
+                transcripts.append(
+                    await transcribe(
+                        data=part.data, filename=part.filename or "audio.webm", mime_type=part.mime_type, agent_settings=agent_settings
+                    )
                 )
-                transcripts.append(tr.text)
-                await analytics.track("stt.transcribed", data={"model": model})
-            except Exception:
+                await analytics.track("stt.transcribed", data={"agent_id": agent_id})
+            except UserVisibleAgentError as exc:
+                yield send.text(str(exc), author=author)
+                yield send.run_end(status="failed", error="stt_configuration")
+                return
+            except Exception as exc:  # noqa: BLE001
                 logger.exception("STT failed")
-                await analytics.track("error.occurred", data={"stage": "stt"})
-        elif part.type == "image":
-            fname = getattr(part, "filename", None) or "image"
+                record_soft_failure("stt", "transcribe", exc, agent_id=agent_id)
+                notes.append("[Áudio recebido, mas a transcrição falhou.]")
+        elif kind == "image":
+            url = (getattr(part, "url", None) or "").strip() or None
             data = getattr(part, "data", None) or b""
-            raw_url = getattr(part, "url", None)
-            url = raw_url.strip() if isinstance(raw_url, str) else None
-            if url == "":
-                url = None
             if data or url:
-                image_parts.append((data, getattr(part, "mime_type", None), fname, url))
+                images.append(ImagePart(data=data, mime_type=part.mime_type or "image/jpeg", filename=part.filename or "image", url=url))
             else:
-                doc_notes.append(f"[Imagem: {fname}]")
+                notes.append(f"[Imagem: {part.filename or 'image'}]")
+        elif kind == "document":
+            processed = await process_document_part(
+                agent_id=agent_id, thread_id=incoming.context.thread_id, event_id=incoming.context.event_id, part=part
+            )
+            await analytics.track("document.processed", data={"agent_id": agent_id, "status": processed.status})
+            notes.append(summarize_document_for_note(processed))
 
-    text_segments: list[str] = []
+    segments: list[str] = []
     if incoming.message:
-        text_segments.append(incoming.message)
+        segments.append(incoming.message)
     if transcripts:
-        ttext = "\n".join(transcripts)
-        transcript_labeled = f"Audio Translation: {ttext}"
-        text_segments.append(transcript_labeled)
-        wire_parts = incoming_parts_to_wire_content_dicts(content_parts)
-        wire_parts.append({"type": "text", "text": transcript_labeled})
-        yield send.update_user_event(
-            event_id=incoming.context.event_id,
-            content=wire_parts,
-        )
-    if doc_notes:
-        text_segments.append("\n".join(doc_notes))
+        labeled = "Audio Translation: " + "\n".join(transcripts)
+        segments.append(labeled)
+        wire_parts = incoming_parts_to_wire_content_dicts(incoming.content or [])
+        wire_parts.append({"type": "text", "text": labeled})
+        yield send.update_user_event(event_id=incoming.context.event_id, content=wire_parts)
+    if notes:
+        segments.append("\n".join(notes))
 
-    text_for_llm = "\n".join(text_segments).strip()
-
-    if not text_for_llm.strip() and not image_parts:
-        yield send.text("Envie uma mensagem de texto ou áudio.", author=agent_display_name)
+    incoming.message = "\n".join(segments).strip()
+    incoming.content = images
+    if not incoming.message and not images:
+        yield send.text("Envie uma mensagem de texto, áudio, imagem ou documento.", author=author)
         yield send.run_end()
         return
 
-    incoming.message = text_for_llm
-    incoming.content = [
-        ImagePart(
-            data=d,
-            mime_type=m or "image/jpeg",
-            filename=fname or "image",
-            url=u,
-        )
-        for d, m, fname, u in image_parts
-    ]
-
+    # --- run ------------------------------------------------------------------------------
+    outcome: WorkflowOutcome | None = None
     try:
-        out = await run_workflow(
-            incoming=incoming,
-            send=send,
-            memory=memory,
-            analytics=analytics,
-            agent_settings=agent_settings,
-            api_provider=_api_provider_wire(agent_settings),
-        )
-    except ValueError as e:
-        yield send.text(str(e), author=agent_display_name)
-        yield send.run_end(status="failed", error="unsupported_input")
-        return
-    except UserVisibleAgentError as e:
-        yield send.text(str(e), author=agent_display_name)
+        async for event in run_workflow(
+            incoming=incoming, send=send, memory=memory, analytics=analytics, agent_settings=agent_settings, author=author
+        ):
+            if isinstance(event, WorkflowOutcome):
+                outcome = event
+            else:
+                yield event
+    except UserVisibleAgentError as exc:
+        yield send.text(str(exc), author=author)
         yield send.run_end(status="failed", error="user_message")
         return
-    except Exception as e:
-        logger.exception("run_workflow failed")
-        await analytics.track(
-            "error.occurred",
-            data={"error_type": type(e).__name__, "stage": "workflow"},
-        )
-        yield send.text(GENERIC_USER_ERROR_MESSAGE, author=agent_display_name)
+    except ValueError as exc:
+        yield send.text(str(exc), author=author)
+        yield send.run_end(status="failed", error="unsupported_input")
+        return
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("workflow failed")
+        await analytics.track("error.occurred", data={"error_type": type(exc).__name__, "stage": "workflow"})
+        yield send.text(GENERIC_USER_ERROR_MESSAGE, author=author)
         yield send.run_end(status="failed", error="workflow_failed")
         return
 
-    if _feedback_form_requested(out.get("new_runner_items") or []):
-        yield _feedback_form(send)
-        yield send.run_end()
+    if outcome is None:
+        yield send.text(GENERIC_USER_ERROR_MESSAGE, author=author)
+        yield send.run_end(status="failed", error="no_outcome")
         return
 
-    reply = (out.get("reply") or "").strip()
-    if not reply:
-        reply = "Sem resposta do modelo."
+    for name in outcome.tools_called:
+        await analytics.track("tool.called", data={"agent_id": agent_id, "tool": name})
+    for skill_id in outcome.skills_loaded:
+        await analytics.track("skill.loaded", data={"agent_id": agent_id, "skill": skill_id})
 
-    yield send.text(reply, author=agent_display_name)
+    reply = outcome.reply or "Sem resposta do modelo."
+    yield send.text(reply, author=author)
 
-    mode = (agent_settings.get("reply_mode") or "text").strip().lower()
-    if mode in ("voz", "ambos", "voice", "both"):
-        try:
-            url, mime = await generate_speech(reply, agent_settings=agent_settings)
-            yield send.audio(url=url, mime_type=mime, author=agent_display_name)
-        except Exception:
-            logger.exception("TTS failed")
-            await analytics.track("error.occurred", data={"stage": "tts"})
+    if outcome.status == "ok":
+        mode = str(agent_settings.get("reply_mode") or "text").strip().lower()
+        if mode in {"voz", "ambos", "voice", "both"}:
+            try:
+                url, mime = await generate_speech(reply, agent_settings=agent_settings)
+                yield send.audio(url=url, mime_type=mime, author=author)
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("TTS failed")
+                record_soft_failure("tts", "generate_speech", exc, agent_id=agent_id)
 
-    yield send.run_end()
+    if outcome.status.startswith("guard_"):
+        # A policy block is a legitimate outcome, not a system failure.
+        await analytics.track("guardrail.blocked", data={"agent_id": agent_id, "phase": outcome.status})
+        yield send.run_end()
+    elif outcome.status == "ok":
+        yield send.run_end()
+    else:
+        yield send.run_end(status="failed", error=outcome.status)

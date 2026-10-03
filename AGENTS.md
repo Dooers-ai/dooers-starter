@@ -4,40 +4,38 @@ Instructions for AI coding agents working in this repository.
 
 ## Primary skill
 
-**Read [skills.md](skills.md) first** — canonical workflow for building Dooers-connected agents and integrations, including **best practices** (credentials ask, test-before-push, role/channel workflows).
-
-If the user links `skills.md` from GitHub or asks for a Dooers agent, follow that file end-to-end.
+**Read [skills.md](skills.md) first** — canonical workflow for building Dooers agents on this starter
+(gateway LLM, managed RAG, Skills, tools, multimodal input, deploy).
 
 ## Project
 
-Official **Dooers agent starter kit** — FastAPI service using `dooers-agents-server[dooers,observability]>=0.16.1` (charts, reasoning, OTel).
+Official **Dooers agent starter kit** — FastAPI + `dooers-agents-server[dooers,observability]>=0.23`.
+LLM through the **Dooers Gateway** (OpenAI-compatible), knowledge through the **managed Dooers RAG**,
+one agent with a stable tool catalog and **Skills** loaded on demand.
 
 ## Read before coding
 
-1. [docs/01-anatomy.md](docs/01-anatomy.md) — architecture
-2. [docs/02-sdk-contract.md](docs/02-sdk-contract.md) — handler API
-3. [.cursor/rules/dooers-agent.mdc](.cursor/rules/dooers-agent.mdc) — constraints
-4. [docs/09-charts.md](docs/09-charts.md) / [docs/10-observability.md](docs/10-observability.md) when touching BI or traces
+1. [docs/01-anatomy.md](docs/01-anatomy.md) — layers and the turn flow
+2. [docs/03-capabilities.md](docs/03-capabilities.md) — Skills vs tools, how to add each
+3. [docs/02-sdk-contract.md](docs/02-sdk-contract.md) — handler API
+4. [docs/04-rag.md](docs/04-rag.md) / [docs/05-uploads.md](docs/05-uploads.md) when touching knowledge or attachments
 
 ## Commands
 
 ```bash
 uv sync --extra dev
-uv run poe check    # required before suggesting push
-uv run poe dev      # local server :8005 (optional qualitative; ngrok → Messages URL)
-dooers validate     # optional pre-push check
-dooers push         # deploy (creator runs after dooers login)
+uv run poe check    # ruff on src + tests — required before suggesting push
+uv run poe test     # pytest invariants (tool catalog, skills parser, prompt stability, schema)
+uv run poe dev      # local server :8000
+dooers validate && dooers push
 ```
-
-Deploy guide: [docs/08-deploy.md](docs/08-deploy.md)  
-Deploy recipe (AI prompt): [docs/recipes/deploy-with-dooers-push.md](docs/recipes/deploy-with-dooers-push.md)
 
 ## Extension pattern
 
-New business domain → new file in `src/modules/agent/capabilities/` + handoff in `workflow.py`.
+- Procedure / policy the model should follow → a Skill (`skills/<id>.md` or Studio upload). No code.
+- New action (API, DB, side effect) → `ToolSpec` in `core/tool_catalog.py` + implementation in `core/tools.py` + `ALL_TOOLS`.
+- Do **not** add agents/handoffs for business domains. Do **not** put volatile data (date, user, documents) in `policies.py`.
+- Studio fields → `schemas.py`; env → `config.py` (+ `.env.example`, `env.prod.example`).
 
-When integrations need accounts/keys: **ask** the user (account exists? env vs settings vs chat form? auth formats) before wiring secrets.
-
-When audiences differ: branch capabilities by `incoming.context.user.organization_role` / `workspace_role` and/or `incoming.context.channel`.
-
-Do not modify the published SDK packages. Stay within this starter and public Dooers packages.
+When integrations need accounts/keys: **ask** the user (env vs settings vs chat form, auth format) before wiring secrets.
+Never commit `.env`, `env.prod`, service-account JSON. Do not modify published SDK packages.

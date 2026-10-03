@@ -1,86 +1,40 @@
-# RAG (base de conhecimento)
+# RAG (base de conhecimento) — serviço gerenciado Dooers
 
 ## Fluxo
 
-1. Criador faz upload no Studio → `POST /settings-upload`
-2. Ficheiro vai para OpenAI Files + Vector Store (+ GCS/Azure opcional)
-3. Capability recebe tool `dooers_file_search_{field_id}`
-4. LLM chama a tool com query curta → extratos voltam ao modelo
+1. Criador envia arquivos no Studio (campo **Documentos**, `field_id=knowledge`) → `POST /settings-upload`.
+2. `rag_service.ingest_bytes` → `dooers.tools.rag.upload` (knowledge base = `field_id`, estratégia por extensão).
+3. O Studio mostra o inventário real do serviço: `knowledge_sync.install_settings_knowledge_hydrate` sobrepõe os
+   campos `FILE_MULTI` ao ler settings. Remover no Studio → `knowledge_settings_hook.on_settings_updated` apaga no serviço.
+4. No turno, `RuntimeContext.knowledge_bases` lista as bases com conteúdo; o modelo chama `search_knowledge`.
+5. Resultados voltam com cabeçalho `[knowledge_base=… score=… document_id=… source=…]` para citação.
 
 ## Configuração
 
-### Env (servidor)
-
 ```env
-RAG_PIPELINE=openai
-OPENAI_API_KEY=sk-...
-STORE_RAG_UPLOADS=false   # true + GCS/Azure para arquivo dos originais
-RAG_STORAGE_SERVICE=none  # gcp | azure
+DOOERS_RAG_SERVICE_URL=https://rag.dooers.ai   # vazio → RAG desligado
+AGENT_SEED_SECRET=...                          # mint do token de serviço
 ```
 
-### Studio (criador)
+Sem `DOOERS_RAG_SERVICE_URL`, `/settings-upload` responde 503 e o prompt diz ao modelo para não buscar.
 
-Campo `knowledge_files` em `schemas.py` — tipo `FILE_UPLOAD`, visibility `CREATOR`.
+## Contexto de execução (importante para tools)
 
-### Persistir anexos de chat no RAG
+O SDK do RAG lê `agent_id`/`organization_id`/`workspace_id`/`user_id` de um contexto **por asyncio Task**. O Agents SDK
+executa tools em tasks filhas, então `search_knowledge` chama `rebind_execution_context(...)` antes de buscar. Qualquer
+nova tool que use `dooers.tools.rag` deve fazer o mesmo (`src/modules/rag/managed.py`).
 
-```env
-STORE_CHAT_UPLOADS=true
-CHAT_STORAGE_SERVICE=gcp
-GCP_BUCKET_NAME=...
-```
+## Várias bases
 
-No Studio: ativar `persist_chat_attachments`.
+Uma knowledge base por campo `FILE_MULTI`. Para separar domínios, adicione campos em `schemas.py` e inclua os ids em
+`rag/knowledge_settings.py::KNOWLEDGE_FIELD_IDS`. `search_knowledge` recebe `knowledge_bases` do contexto.
 
-Quando ativo, `POST /uploads` também indexa no Vector Store (source `chat` ou `form`).
+## Extensões aceitas
 
-## Scoping por capability
-
-```python
-await create_cortex(
-    ...,
-    knowledge_field_allowlist=("knowledge_files",),
-)
-```
-
-Cada capability pode ter allowlist diferente — ver `feedback.py`.
-
-## Hook de reindexação
-
-`knowledge_settings_hook.py` reprocessa ficheiros quando settings mudam no Studio.
-
-## Migrações
-
-`migrations/001_agent_rag.sql` — tabelas `agent_knowledge_files`, `agent_rag_vector_store`.
-
-Aplicadas no startup via `src/database/pool.py` quando `APP_POSTGRES_POOL_ENABLED=true`.
-
-## Dois caminhos de banco (importante no deploy)
-
-O starter separa **persistência do SDK** (threads, settings, eventos) do **pool SQL do app** (metadados RAG):
-
-| Caminho | Env / código | Banco gerenciado (`AGENT_DATABASE_TYPE=dooers`) |
-|---------|--------------|--------------------------------------------------|
-| SDK | `agent_server.ensure_initialized()` | AlloyDB via IAM — funciona no Cloud Run |
-| App pool | `init_pool()` / `APP_POSTGRES_POOL_ENABLED` | Desligado por padrão recomendado — DSN com senha não funciona com user IAM |
-
-Com `database.type: dooers` no `dooers.yaml`, defina no `env.prod`:
-
-```bash
-AGENT_DATABASE_TYPE=dooers
-APP_POSTGRES_POOL_ENABLED=false
-```
-
-Chat e threads via SDK funcionam. `/settings-upload` que grava metadados nas tabelas SQL do starter
-fica indisponível até suporte futuro ao pool em AlloyDB — ou use Postgres próprio com
-`APP_POSTGRES_POOL_ENABLED=true` e `AGENT_DATABASE_*` preenchidos.
-
-## Extensões permitidas
-
-`pdf, csv, xlsx, xls, doc, docx` — validado em `settings_upload.py`.
+`.pdf .csv .xlsx .xls .docx .json .txt .md` — `rag/ingest_filename.py`.
 
 ## Boas práticas
 
-- Instrua o modelo a citar apenas extratos devolvidos pela tool
-- Queries curtas e específicas funcionam melhor
-- Separe bases por `field_id` se tiver domínios distintos
+- O prompt já instrui: responder com base nos trechos retornados e dizer de onde vieram.
+- Queries curtas e específicas; `max_results` 5–8.
+- Documentos anexados **na conversa** não vão para o RAG — usam `get_thread_document_context` ([05-uploads.md](05-uploads.md)).

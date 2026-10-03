@@ -1,88 +1,88 @@
-# Capabilities
+# Capacidades: Skills e Tools
 
-Capabilities são **agentes especializados** no grafo OpenAI Agents SDK, ligados por **handoffs**.
+O starter usa **um agente** com uma superfície de ferramentas estável e **Skills** carregadas sob demanda
+(progressive disclosure). Não há grafo de handoffs: especialização vem de instruções, não de agentes extras.
 
-## Estrutura
+| | Skill | Tool |
+|--|-------|------|
+| O que é | Procedimento em Markdown escrito pelo criador | Função Python com side-effect/API/cálculo |
+| Quem cria | Criador (Studio) ou repo `skills/` | Desenvolvedor |
+| Quando entra no contexto | Só quando o modelo chama `load_skill` | Sempre disponível (catálogo fixo) |
+| Exemplos | política de reembolso, roteiro de triagem, formato de relatório | consultar pedido, criar ticket, buscar conhecimento |
 
+## Skills
+
+Arquivo `.md` com frontmatter:
+
+```markdown
+---
+id: refund-policy
+name: Política de reembolso
+description: Use quando o cliente pedir reembolso, troca ou cancelamento.
+requires_tools: [search_knowledge]
+---
+1. Pergunte o número do pedido se não vier na mensagem.
+2. Busque a política vigente com `search_knowledge` ("política de reembolso <categoria>").
+3. ...
 ```
-capabilities/
-  cortex.py      # Entrada — triagem e RAG geral
-  feedback.py    # Exemplo — coleta feedback
-  guard.py       # Guardrails
-  minha_area.py  # ← adicione aqui
-```
 
-## Criar uma capability
+- `id` `[a-z0-9][a-z0-9_-]{1,79}`; `name` ≤ 120; `description` ≤ 500 (é o que o modelo vê no catálogo — escreva como gatilho).
+- `requires_tools` deve referenciar nomes de `core/tool_catalog.py`; o upload rejeita tools inexistentes.
+- Fontes: `skills/*.md` (embutidas, vão na imagem) + campo **Skills** do Studio (`/skills-upload`). Mesmo `id` → o Studio vence.
+- O prompt só carrega `id` + `description`. O corpo chega como resultado de `load_skill` e fica no histórico; em turnos seguintes
+  o `RuntimeContext` detecta o marcador `Skill '<id>' loaded.` e informa ao modelo que não precisa recarregar.
 
-1. Crie `src/modules/agent/capabilities/minha_area.py`:
+Testes: `tests/test_skills.py` valida o parser e as Skills embutidas.
+
+## Tools
+
+Catálogo atual (`core/tool_catalog.py`):
+
+| Tool | Função |
+|------|--------|
+| `load_skill` | Carrega o corpo de uma Skill |
+| `search_knowledge` | RAG gerenciado Dooers nas bases do agente |
+| `get_thread_document_context` | Lê/busca documentos anexados na conversa (`mode`: search/full/summary) |
+| `calculate` | Aritmética determinística (AST seguro) |
+
+### Adicionar uma tool
+
+1. Declare em `core/tool_catalog.py`:
 
 ```python
-from agents import Agent, function_tool
+ToolSpec("get_order_status", "Looks up an order by id in the ERP."),
+```
 
+2. Implemente em `core/tools.py` (fina: valida, chama módulo de negócio, formata string; erros esperados viram texto):
+
+```python
 @function_tool
-def consultar_pedido(pedido_id: str) -> str:
-    """Consulta status de um pedido pelo ID."""
-    return f"Pedido {pedido_id}: em separação"
-
-async def create_minha_area(agent_id: str, agent_settings: dict) -> Agent:
-    return Agent(
-        name="pedidos",
-        instructions="Você ajuda com pedidos. Use consultar_pedido quando souber o ID.",
-        tools=[consultar_pedido],
-        handoff_description="Dúvidas sobre pedidos, entregas e rastreio.",
-    )
+async def get_order_status(ctx: RunContextWrapper[RuntimeContext], order_id: str) -> str:
+    """Look up an order by id."""
+    ctx.context.record_tool_call("get_order_status")
+    order = await erp_client.get_order(order_id.strip())
+    if order is None:
+        return f"Order {order_id!r} not found."
+    return json.dumps(order, ensure_ascii=False)
 ```
 
-2. Registe em `workflow.py`:
+3. Adicione em `ALL_TOOLS` e, se quiser rótulo na UI, em `_TOOL_DISPLAY` (`workflow.py`).
+4. `tests/test_prompt_and_context.py::test_tool_catalog_matches_registered_tools` garante que catálogo e registro batem.
 
-```python
-from src.modules.agent.capabilities.minha_area import create_minha_area
+Clientes externos ficam em `src/modules/external/<serviço>/`. Credenciais: campos `PASSWORD` no `schemas.py`
+(lidos de `ctx.context.agent_settings`) ou env — veja [recipes/external-service-credentials.md](recipes/external-service-credentials.md).
 
-async def _create_additional_capabilities(agent_id, agent_settings):
-    pedidos = await create_minha_area(agent_id, agent_settings)
-    return [pedidos]
-```
+## Quando ainda faz sentido outro agente
 
-O loop existente já faz `cortex.handoffs.append(agent)`.
+Só para tarefas internas com saída estruturada (ex.: classificador de guardrail em `core/guard.py`). Para o usuário final, mantenha um agente.
 
-3. Ajuste instruções do **cortex** se necessário (em `schemas.py` → `system_prompt`).
+## Guardrails
 
-## Handoffs encadeados
+Campos do Studio `guardrails_prompt` (entrada e saída), `input_guardrails_prompt`, `output_guardrails_prompt`.
+Um agente classificador (`GuardDecision`) roda antes/depois do turno; tripwire → o motivo vira a resposta e o `run_end` é normal
+(bloqueio de política não é falha de sistema).
 
-Para grafos com vários níveis de especialista:
+## Execution guard
 
-```python
-suporte = await create_suporte(...)
-escalacao = await create_escalacao(...)
-cortex.handoffs.append(suporte)
-suporte.handoffs.append(escalacao)
-```
-
-Ver `workflow.py` e `capabilities/feedback.py` neste repositório.
-
-## RAG por capability
-
-Limite tools de conhecimento a campos específicos:
-
-```python
-cortex = await create_cortex(
-    agent_id=agent_id,
-    agent_settings=agent_settings,
-    attach_knowledge_tools=True,
-    knowledge_field_allowlist=("knowledge_files",),  # só este campo
-)
-```
-
-## Tools vs handoffs
-
-| Use handoff quando… | Use tool quando… |
-|---------------------|------------------|
-| Domínio distinto com instruções próprias | Ação pontual (API, cálculo) |
-| Conversa longa no especialista | Dados estruturados rápidos |
-| RAG com escopo diferente | Side-effect idempotente |
-
-## Exemplo no starter: feedback
-
-`feedback.py` expõe `request_feedback_form` → handler detecta `requiresForm` → emite `send.form()`.
-
-Ver [06-forms.md](06-forms.md) e `src/modules/agent/agent.py`.
+`core/execution_guard.py` detecta finais passivos ("vou verificar…", "aguarde um instante") e roda uma continuação com
+instrução de reparo. Se insistir, responde `SAFE_FAILURE_REPLY`. Ajuste os padrões se o seu domínio usar essas frases legitimamente.

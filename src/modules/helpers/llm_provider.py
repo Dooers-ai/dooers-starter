@@ -1,134 +1,85 @@
-"""OpenAI Agents SDK model routing: OpenAI / Azure chat clients vs LiteLLM for Gemini / Claude."""
+"""OpenAI Agents SDK wiring for the Dooers Gateway (or BYO OpenAI).
+
+The gateway speaks Chat Completions. The Agents SDK defaults to the Responses API, so we build a
+``MultiProvider`` with ``openai_use_responses=False`` and read thread history in the matching
+``openai_completions`` wire format — mixing the two formats is the most common silent failure.
+"""
 
 from __future__ import annotations
 
-import os
-from contextlib import asynccontextmanager
+from functools import lru_cache
 from typing import Any
 
 from agents import RunConfig
 from agents.model_settings import ModelSettings
 from agents.models.multi_provider import MultiProvider
 from openai import AsyncOpenAI
+from openai.types.shared.reasoning import Reasoning
 
-from src.modules.llm.factory import (
-    USER_MESSAGE_MISSING_AZURE_ENDPOINT,
-    USER_MESSAGE_UNKNOWN_LLM_PROVIDER,
-    UserVisibleAgentError,
-    _resolve_chat_provider_and_model,
-    _strip,
-    ensure_llm_provider_config,
-    provider_api_key,
-)
+from src.config import settings
+from src.modules.llm.factory import ensure_llm_provider_config, normalize_llm_provider, resolve_chat_model
+from src.modules.llm.gateway_models import allowed_model_ids
 
-
-class LiteLLMAPIKeyUnset(UserVisibleAgentError):
-    """Litellm keys are propagated via OS env vars for the Agents LiteLLM provider."""
+_ALLOWED_REASONING_EFFORT = frozenset({"none", "low", "medium", "high"})
+# Model families that reject ``temperature`` and take a reasoning effort instead.
+_REASONING_FAMILIES = ("gpt-5", "o1", "o3", "o4", "claude-opus-5", "glm-5", "gemini-3")
 
 
-def resolve_agents_run_model_name(agent_settings: dict[str, Any]) -> tuple[str, str, str]:
-    """Return `(provider_key, logical_model_name, agents_model_identifier)`.
+@lru_cache(maxsize=4)
+def _client(api_key: str, base_url: str | None) -> AsyncOpenAI:
+    kwargs: dict[str, Any] = {"api_key": api_key}
+    if base_url:
+        kwargs["base_url"] = base_url
+    return AsyncOpenAI(**kwargs)
 
-    `agents_model_identifier` is passed to Agents as the model name (possibly `litellm/...`).
-    """
+
+def get_chat_client() -> AsyncOpenAI:
+    """OpenAI-compatible client for chat turns: gateway when configured, else BYO OpenAI."""
+    ensure_llm_provider_config({})
+    if normalize_llm_provider() == "dooers_gateway":
+        return _client(settings.dooers_gateway_api_key.strip(), settings.gateway_base_url)
+    return _client(settings.openai_api_key.strip(), None)
+
+
+def resolve_agents_wire_format() -> str:
+    """History/input format for ``memory.get_history`` and ``format_user_input``."""
+    return "openai_completions" if normalize_llm_provider() == "dooers_gateway" else "openai_responses"
+
+
+def resolve_agents_run_model_name(agent_settings: dict[str, Any]) -> str:
     ensure_llm_provider_config(agent_settings)
-    provider, model = _resolve_chat_provider_and_model(agent_settings)
-
-    if provider == "openai":
-        return provider, model, model
-    if provider == "azure_openai":
-        return provider, model, model
-
-    if provider == "gemini":
-        litellm_id = model if model.startswith("gemini/") else f"gemini/{model}"
-        return provider, model, f"litellm/{litellm_id}"
-
-    if provider == "claude":
-        litellm_id = model if model.startswith("anthropic/") else f"anthropic/{model}"
-        return provider, model, f"litellm/{litellm_id}"
-
-    raise UserVisibleAgentError(USER_MESSAGE_UNKNOWN_LLM_PROVIDER)
+    return resolve_chat_model(agent_settings, allowed=allowed_model_ids() or None)
 
 
-def build_model_provider(agent_settings: dict[str, Any]) -> MultiProvider:
-    ensure_llm_provider_config(agent_settings)
-    key = provider_api_key(agent_settings)
-    provider, _model = _resolve_chat_provider_and_model(agent_settings)
-
-    if provider == "azure_openai":
-        try:
-            from openai import AsyncAzureOpenAI
-        except ImportError as e:  # pragma: no cover
-            raise UserVisibleAgentError(USER_MESSAGE_UNKNOWN_LLM_PROVIDER) from e
-
-        endpoint = _strip(agent_settings.get("provider_azure_openai_endpoint"))
-        if not endpoint:
-            raise UserVisibleAgentError(USER_MESSAGE_MISSING_AZURE_ENDPOINT)
-        api_version = _strip(agent_settings.get("provider_azure_openai_api_version")) or "2024-08-01-preview"
-        client = AsyncAzureOpenAI(
-            api_version=api_version,
-            azure_endpoint=endpoint,
-            api_key=key,
-        )
-        return MultiProvider(openai_client=client)
-
-    if provider == "openai":
-        client = AsyncOpenAI(api_key=key)
-        return MultiProvider(openai_client=client)
-
-    return MultiProvider()
-
-
-def build_agents_run_config(agent_settings: dict[str, Any], *, agents_model_identifier: str) -> RunConfig:
-    return RunConfig(
-        model=agents_model_identifier,
-        model_provider=build_model_provider(agent_settings),
-        model_settings=ModelSettings(temperature=0.2),
+def build_model_provider() -> MultiProvider:
+    return MultiProvider(
+        openai_client=get_chat_client(),
+        openai_use_responses=normalize_llm_provider() != "dooers_gateway",
     )
 
 
-def _snapshot_env(names: tuple[str, ...]) -> dict[str, str | None]:
-    return {n: os.environ.get(n) for n in names}
+def _is_reasoning_model(model: str) -> bool:
+    normalized = (model or "").strip().lower()
+    return normalized.startswith(_REASONING_FAMILIES)
 
 
-def _restore_env(snapshot: dict[str, str | None]) -> None:
-    for key, val in snapshot.items():
-        if val is None:
-            os.environ.pop(key, None)
-        else:
-            os.environ[key] = val
-
-
-@asynccontextmanager
-async def litellm_api_key_env(agent_settings: dict[str, Any]):
-    """LiteLLM inside `openai-agents` expects provider keys via environment variables."""
-    provider, _logical, agents_model_id = resolve_agents_run_model_name(agent_settings)
-    if not agents_model_id.startswith("litellm/"):
-        yield
-        return
-
-    key = provider_api_key(agent_settings)
-    if not key.strip():
-        raise LiteLLMAPIKeyUnset(
-            "A chave de API do LLM deve estar configurada para este fornecedor (LiteLLM)."
-        )
-
-    if provider == "gemini":
-        names = ("GEMINI_API_KEY", "GOOGLE_API_KEY")
-        snap = _snapshot_env(names)
-        os.environ["GEMINI_API_KEY"] = key
-        os.environ["GOOGLE_API_KEY"] = key
-        try:
-            yield
-        finally:
-            _restore_env(snap)
-    elif provider == "claude":
-        names = ("ANTHROPIC_API_KEY",)
-        snap = _snapshot_env(names)
-        os.environ["ANTHROPIC_API_KEY"] = key
-        try:
-            yield
-        finally:
-            _restore_env(snap)
+def build_agents_run_config(
+    agent_settings: dict[str, Any],
+    *,
+    model: str,
+    prompt_cache_key: str | None = None,
+) -> RunConfig:
+    kwargs: dict[str, Any] = {}
+    if _is_reasoning_model(model):
+        effort = str(agent_settings.get("reasoning_effort") or "").strip().lower()
+        if effort in _ALLOWED_REASONING_EFFORT:
+            kwargs["reasoning"] = Reasoning(effort=effort)  # type: ignore[arg-type]
     else:
-        yield
+        kwargs["temperature"] = 0.2
+    if prompt_cache_key:
+        kwargs["extra_args"] = {"prompt_cache_key": prompt_cache_key}
+    return RunConfig(
+        model=model,
+        model_provider=build_model_provider(),
+        model_settings=ModelSettings(**kwargs),
+    )

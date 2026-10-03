@@ -1,27 +1,29 @@
-protocol_version: "2"
-agent_id: bae9ac1d-0f42-4916-b218-9e2c09a047cb
-organization_id: e7d3594c-f61f-49c7-a4a0-ca288dd0619e
-name: starter-deploy-test
-description: Starter agent built with dooers-starter.
-# Caminho do endpoint de mensagens (WebSocket). Mantenha "/" — o agente serve na raiz
-# e o load balancer da Dooers roteia https://agents.dooers.ai/<agent-id>/… removendo o
-# prefixo /<agent-id> antes de encaminhar. Requer USE_API_PREFIX=false no runtime.
+protocol_version: "3"
+# Filled by `dooers init` / `dooers push` — leave the placeholders until then.
+agent_id: 00000000-0000-0000-0000-000000000000
+organization_id: 00000000-0000-0000-0000-000000000000
+name: my-agent
+description: Agent built with the Dooers starter (gateway LLM, managed RAG, Skills, multimodal).
+# WebSocket endpoint path. Keep "/": the Dooers load balancer strips /<agent-id> before
+# forwarding, and the service serves at the root (USE_API_PREFIX=false).
 message_path: /
 message_scheme: wss
-# "postgres" (padrão): você fornece o banco via AGENT_DATABASE_* no env.prod.
-# "dooers": banco gerenciado pela Dooers (provisionado no push; env.prod:
-#   AGENT_DATABASE_TYPE=dooers + APP_POSTGRES_POOL_ENABLED=false — ver README).
+# dooers → managed database provisioned on push (env.prod: AGENT_DATABASE_TYPE=dooers)
+# postgres → you provide AGENT_DATABASE_* in env.prod
 database:
-  type: postgres
+  type: dooers
 whatsapp:
   enabled: true
   path: /whatsapp/inbound
 profile:
-  summary: Assistente com RAG, formularios e WhatsApp via Dooers.
+  summary: Assistente multimodal com base de conhecimento, Skills e WhatsApp.
   capabilities:
-    - chat multimodal
-    - base de conhecimento
+    - chat multimodal (texto, áudio, imagem, documentos)
+    - base de conhecimento (RAG Dooers)
+    - skills carregadas sob demanda
 ui:
   suggested_prompts:
-    - title: O que voce sabe?
-      prompt: O que voce sabe sobre a empresa?
+    - title: O que você sabe?
+      prompt: O que você sabe sobre a empresa?
+    - title: Resumir um documento
+      prompt: Anexe um PDF e peça um resumo dos pontos principais.

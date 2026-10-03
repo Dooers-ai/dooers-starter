@@ -89,7 +89,7 @@ raw = await memory.get_history_raw(limit=10)
 
 ```python
 agent_settings = await settings.get_all()
-# dict com campos de schemas.py (system_prompt, llm_model, knowledge_files…)
+# dict com campos de schemas.py (system_prompt, llm_models, skills, knowledge…)
 ```
 
 ## `analytics` — telemetria
