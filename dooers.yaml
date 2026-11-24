@@ -4,9 +4,9 @@ agent_id: 00000000-0000-0000-0000-000000000000
 organization_id: 00000000-0000-0000-0000-000000000000
 name: my-agent
 description: Agent built with the Dooers starter (gateway LLM, managed RAG, Skills, multimodal).
-# WebSocket endpoint path. Keep "/": the Dooers load balancer strips /<agent-id> before
-# forwarding, and the service serves at the root (USE_API_PREFIX=false).
-message_path: /
+# WebSocket endpoint path: must match the route in src/main.py (/ws). The Dooers load balancer
+# strips /<agent-id> before forwarding, so hosted clients reach wss://agents.dooers.ai/<agent-id>/ws.
+message_path: /ws
 message_scheme: wss
 # dooers → managed database provisioned on push (env.prod: AGENT_DATABASE_TYPE=dooers)
 # postgres → you provide AGENT_DATABASE_* in env.prod
